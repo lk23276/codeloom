@@ -1,0 +1,67 @@
+[project]
+name = "codeloom"
+version = "0.0.1"
+description = "CodeLoom（码络）· 可溯源的多 Agent 工程知识助手"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.2",
+    "httpx>=0.28.1",
+    "openai>=3.46.0",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.2",
+    "tenacity>=9.2.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+# 源码包位于 src/app（而非默认的 src/<项目名>）
+[tool.uv.build-backend]
+module-name = "app"
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 不需要 pythonpath：codeloom 已以 editable 装进 .venv，
+# uv_build 的 module-name="app" 让 `import app` 直接指向 src/app
+asyncio_mode = "auto"          # 裸 async def 测试会被自动当作协程测试（不用写 @pytest.mark.asyncio）
+addopts = "-q --strict-markers"
+markers = ["slow: 慢测试，用 -m 'not slow' 排除"]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100          # 同时影响 `ruff check`(E501) 与 `ruff format` 的折行
+target-version = "py313"   # 与 .python-version / requires-python 保持一致
+
+[tool.ruff.lint]
+# 显式声明规则集 = 把"什么算错"钉成项目契约, 不随 ruff 版本漂移
+# (不写 select 时用的是"版本默认集", 实测 0.17.0 已含 I/B/S/SIM 族, 且会漏报 E501/E711)
+select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI 的 Depends()/Query() 必须写在参数默认值里, 这是框架惯用法,
+#       ruff 文档也明确建议 FastAPI 项目忽略这条
+ignore = ["B008"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+]

@@ -1,0 +1,58 @@
+# ══════════════════════════════════════════════════════════════════════
+#  构建上下文要小：镜像里只留「运行时需要的东西」。
+#  ★ 每条被排除的路径都要想一遍：它会不会是 RUN / COPY 的源？
+#    踩过的坑：把 COPY 的源写进 .dockerignore，报错是
+#    `failed to calculate checksum ... not found`，看着像语法错误。
+# ══════════════════════════════════════════════════════════════════════
+
+# ── 版本控制与本地环境 ──
+.git
+.gitignore
+.gitattributes
+.venv
+venv
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── 密钥与本地配置（绝不进镜像）──
+.env
+.env.*
+!.env.example
+
+# ── 运行时产物 ──
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+logs/
+*.log
+
+# ── 测试与静态检查缓存 ──
+tests/
+.pytest_cache/
+.pytest-tmp/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# ── 文档、评测、压测、脚本：镜像不需要 ──
+docs/
+benchmark/
+eval/
+scripts/
+*.md
+!README.md
+
+# ── 容器自身 ──
+Dockerfile
+.dockerignore
+
+# ── IDE / 系统 ──
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

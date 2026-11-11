@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeLoom · 流式演示</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    background: #f6f7f9; color: #1f2328;
+    font: 15px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  main { width: min(760px, 92vw); padding: 40px 0 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 24px; font-size: 13px; }
+  .row { display: flex; gap: 8px; }
+  input {
+    flex: 1; padding: 10px 12px; font: inherit; color: inherit;
+    border: 1px solid #d0d7de; border-radius: 8px; background: #fff;
+  }
+  input:focus { outline: 2px solid #0969da33; border-color: #0969da; }
+  button {
+    padding: 10px 18px; font: inherit; font-weight: 600; color: #fff;
+    background: #0969da; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  button:disabled { background: #9db8d6; cursor: not-allowed; }
+  .meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 8px;
+          font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums; }
+  .meta b { color: #1f2328; font-weight: 600; }
+  #out {
+    min-height: 160px; padding: 16px; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 10px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #out.error { border-color: #cf222e; color: #cf222e; }
+  #out.caret::after { content: "▌"; color: #0969da; animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  footer { margin-top: 20px; font-size: 12px; color: #6b7280; }
+  footer a { color: #0969da; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CodeLoom · 流式问答</h1>
+  <p class="sub">同一个服务、同一个端口：页面用 <code>fetch</code> 读 SSE，逐帧渲染。</p>
+
+  <div class="row">
+    <input id="q" value="用一句话介绍 epoll" maxlength="2000"
+           placeholder="输入一句话，回车发送">
+    <button id="send">发送</button>
+  </div>
+
+  <div class="meta">
+    <span>首字 <b id="ttfb">—</b></span>
+    <span>总耗时 <b id="total">—</b></span>
+    <span>delta <b id="count">0</b></span>
+    <span>会话 <b id="sid">—</b></span>
+  </div>
+
+  <div id="out" aria-live="polite"></div>
+
+  <footer>
+    接口文档 <a href="/docs">/docs</a> ·
+    健康检查 <a href="/healthz">/healthz</a>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const out = $("out");
+let busy = false;
+
+async function ask() {
+  if (busy) return;
+  busy = true;
+  $("send").disabled = true;
+
+  out.className = "caret";
+  out.textContent = "";
+  $("ttfb").textContent = "—";
+  $("total").textContent = "—";
+  $("count").textContent = "0";
+  $("sid").textContent = "—";
+
+  const t0 = performance.now();
+  let first = null;
+  let deltas = 0;
+
+  try {
+    const resp = await fetch("/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: $("q").value, max_tokens: 300 }),
+    });
+
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(`${resp.status} ${body.code || ""} ${body.msg || ""}`.trim());
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE 以空行分帧；正则兼容 CRLF（有些代理会改写换行）
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const event = /^event: (.+)$/m.exec(frame)?.[1];
+
+        // ★ 一帧里的 data 可能有多行（正文含换行时服务端会拆成多条 data:），
+        //   只取第一行会把 Markdown 的换行吃掉。
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => line.slice(6))
+          .join("\n");
+
+        if (event === "meta") {
+          try {
+            $("sid").textContent = JSON.parse(data).session_id.slice(0, 8) + "…";
+          } catch (_) { /* meta 解析失败不影响正文 */ }
+        } else if (event === "delta") {
+          if (first === null) {
+            first = performance.now();
+            $("ttfb").textContent = Math.round(first - t0) + " ms";
+          }
+          deltas += 1;
+          $("count").textContent = String(deltas);
+          out.textContent += data;
+        } else if (event === "error") {
+          throw new Error(data);
+        }
+      }
+    }
+  } catch (err) {
+    out.className = "error";
+    out.textContent = "请求失败：" + err.message;
+  } finally {
+    out.className = "";
+    $("total").textContent = Math.round(performance.now() - t0) + " ms";
+    busy = false;
+    $("send").disabled = false;
+  }
+}
+
+$("send").addEventListener("click", ask);
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+</script>
+</body>
+</html>

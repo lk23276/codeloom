@@ -1,0 +1,67 @@
+# ══════════════════════════════════════════════════════════════════
+#  CodeLoom .gitignore
+#  原则：能被重新生成的一律不入库；密钥永不入库。
+#  ★ 新增工具时同步检查它产出什么文件（曾因漏掉产物被塞进过仓库）
+# ══════════════════════════════════════════════════════════════════
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# ── 归档产物：docker save 出来的镜像 tar（二进制、可重建，分发用 Registry）──
+*.tar
+
+# ── 本地文档（不随仓库发布）──
+docs/*.md
+
+# ── 环境与密钥（绝不入库）──
+.env
+.env.*
+!.env.example
+
+# ── 测试与覆盖率 ──
+.pytest_cache/
+.pytest-tmp/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ── 静态检查缓存 ──
+.ruff_cache/
+.mypy_cache/
+
+# ── 数据：容器里由卷提供，本地是运行时产物 ──
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+data/
+
+# ── RAG 向量库持久化（可重建，不入库）──
+chroma/
+chroma_db/
+.chroma/
+*.chroma/
+
+# ── 日志 ──
+logs/
+*.log
+
+# ── 压测产物：原始 JSON 是一机一时的快照，不入库；汇总报告 md 可入库 ──
+benchmark/results/*.json
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*~
+
+# ── 系统 ──
+.DS_Store
+Thumbs.db

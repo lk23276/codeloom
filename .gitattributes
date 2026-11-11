@@ -1,0 +1,41 @@
+# ══════════════════════════════════════════════════════════════════
+#  CodeLoom .gitattributes
+#  为什么需要它：本项目【Windows 开发 + Linux 容器运行】。
+#  - .py / .sh / Dockerfile 若带 CRLF，进容器后脚本会报
+#      /bin/bash^M: bad interpreter: No such file or directory
+#  - 统一 eol=lf 让「本地能跑」和「容器里能跑」是同一份字节
+# ══════════════════════════════════════════════════════════════════
+
+# 默认：由 git 自动判断是否文本，并统一存为 LF
+* text=auto
+
+# 这些必须 LF（会在 Linux 里被解释执行）
+*.py            text eol=lf
+*.toml          text eol=lf
+*.lock          text eol=lf
+*.md            text eol=lf
+*.html          text eol=lf
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.python-version text eol=lf
+.env.example    text eol=lf
+Dockerfile      text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# Windows 专有脚本保持 CRLF
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# 二进制：不做行尾转换，也不参与 diff
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.db    binary
+*.whl   binary
