@@ -1,6 +1,6 @@
 """对话业务逻辑。
 
-★ 这一层的规矩（违反就是分层破了，而且不会报错）：
+★ 这一层的规矩（违反即破坏分层，而且不会报错）：
   - 不许 `import fastapi` —— 业务层不认识 HTTP
   - 不许写 SQL —— 数据库细节全在 db/store.py
   - 不许 `import openai` —— SDK 细节全在 client/llm.py

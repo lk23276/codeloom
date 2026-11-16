@@ -1,0 +1,184 @@
+{
+  "generated_at": "2026-11-16T10:07:50+08:00",
+  "with_llm": false,
+  "k": 3,
+  "config": {
+    "embed_model": "BAAI/bge-small-zh-v1.5",
+    "rerank_model": "BAAI/bge-reranker-base",
+    "recall_k": 20,
+    "top_n": 5,
+    "min_rerank_score": 0.2
+  },
+  "corpus": {
+    "chunks": 139,
+    "index_dir": "./data/chroma"
+  },
+  "metrics": {
+    "hit_rate_at_recall": 1.0,
+    "hit_rate_at_k": 0.875,
+    "mrr_at_k": 0.7292,
+    "refusal_accuracy": 1.0,
+    "false_refusal_rate": 0.0,
+    "citation_precision": null,
+    "answers_without_citation": null,
+    "invalid_citations": null
+  },
+  "cases": {
+    "locate": [
+      {
+        "id": "L01",
+        "question": "写半包续发在哪里实现",
+        "rank_recall": 3,
+        "rank_top": 0,
+        "hit_at_k": false,
+        "top_score": 2.6167,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L02",
+        "question": "eventfd 是怎么用来唤醒事件循环的",
+        "rank_recall": 1,
+        "rank_top": 1,
+        "hit_at_k": true,
+        "top_score": 5.5801,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L03",
+        "question": "边沿触发是怎么设置的",
+        "rank_recall": 9,
+        "rank_top": 1,
+        "hit_at_k": true,
+        "top_score": 2.9098,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L04",
+        "question": "零拷贝发送文件用的是哪个系统调用",
+        "rank_recall": 1,
+        "rank_top": 3,
+        "hit_at_k": true,
+        "top_score": 1.0579,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L05",
+        "question": "新连接是怎么分给子反应堆的",
+        "rank_recall": 1,
+        "rank_top": 1,
+        "hit_at_k": true,
+        "top_score": 6.6225,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L06",
+        "question": "进程收到 SIGTERM 后怎么优雅退出",
+        "rank_recall": 1,
+        "rank_top": 1,
+        "hit_at_k": true,
+        "top_score": 3.718,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L07",
+        "question": "LangChain 后端为什么要把 max_tokens 放进 extra_body",
+        "rank_recall": 1,
+        "rank_top": 1,
+        "hit_at_k": true,
+        "top_score": 3.2277,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      },
+      {
+        "id": "L08",
+        "question": "服务自身开销占端到端延迟的多少",
+        "rank_recall": 1,
+        "rank_top": 2,
+        "hit_at_k": true,
+        "top_score": 4.889,
+        "refused": false,
+        "recalled": 20,
+        "reranked": 5
+      }
+    ],
+    "refuse": [
+      {
+        "id": "N01",
+        "question": "分析一下 A 股下周走势",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -4.128,
+        "recalled": 20
+      },
+      {
+        "id": "N02",
+        "question": "红烧肉怎么做才不腻",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -7.8593,
+        "recalled": 20
+      },
+      {
+        "id": "N03",
+        "question": "我的猫连续两天不吃饭怎么办",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -6.1,
+        "recalled": 20
+      },
+      {
+        "id": "N04",
+        "question": "推荐一部适合周末看的科幻电影",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -8.8874,
+        "recalled": 20
+      },
+      {
+        "id": "N05",
+        "question": "Kafka 的 ISR 副本同步是怎么实现的",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -3.5157,
+        "recalled": 20
+      },
+      {
+        "id": "N06",
+        "question": "Redis Cluster 的槽位迁移如何保证一致性",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -3.3722,
+        "recalled": 20
+      },
+      {
+        "id": "N07",
+        "question": "MySQL 的 next-key lock 解决了什么问题",
+        "refused": true,
+        "reason": "知识库中无相关依据",
+        "top_score": -2.5929,
+        "recalled": 20
+      }
+    ]
+  },
+  "git": {
+    "commit": "963bfe9",
+    "dirty": true
+  },
+  "notes": [
+    "hit_rate_at_recall 是整条链路的天花板：候选里没有金标块时，重排无法补救",
+    "citation_precision 需要 --with-llm，且受采样影响，回归对比时应固定 with_llm"
+  ]
+}

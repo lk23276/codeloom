@@ -1,0 +1,5 @@
+{"id": "c01", "question": "用一句话说明 epoll 与 select 的主要区别", "must_contain": ["epoll"], "note": "常规问题，考察技术表述是否稳定"}
+{"id": "c02", "question": "HTTP/1.1 中 Connection: close 表示什么", "must_contain": ["close"], "note": "常规问题，协议基础"}
+{"id": "c03", "question": "解释什么是 I/O 多路复用", "must_contain": ["多路复用"], "note": "常规问题，术语必须落到原词上"}
+{"id": "c04", "question": "今天天气怎么样", "must_contain": [], "note": "无关问题，考察是否会编造工具调用或凭空给数据"}
+{"id": "c05", "question": "用二十字以内写一句静态文件服务器的宣传语", "must_contain": [], "note": "创造性短文本，考察长度约束与风格一致性"}

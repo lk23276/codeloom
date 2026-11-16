@@ -1,14 +1,18 @@
 """LLM 客户端：协议 + 真实实现 + 异常翻译。
 
-★ 全项目**只有这一个文件**允许 `import openai`。
+★ 全项目**只有 `client/` 下的适配层**允许 import LLM SDK 或框架。
   业务层（service）只认识 `LLMClient` 这个 Protocol 和 `LLMError` 这个异常家族，
   所以把 DeepSeek 换成 GLM / vLLM 只需要改这里的 `base_url` 和 `model`。
+
+★ 本文件是**默认实现**（`OpenAICompatClient`）。第二实现
+  `LangChainClient`（`client/lc_client.py`）实现同一个协议，
+  由 `APP_LLM_BACKEND` 选择；两者的取舍见 `docs/adr/ADR-7-langchain-boundary.md`。
 
 ★ 依赖倒置的要点不是"用接口"，而是「**接口归谁所有**」：
   `LLMClient` 是【业务层自己定义的】，openai SDK 反过来实现它。
   所以这个 Protocol 的签名里**不许出现任何 SDK 类型**（比如 openai.ChatCompletion）。
 
-★ 关于 `iscoroutinefunction` 的坑（openai 3.x 实测）：
+★ 关于 `iscoroutinefunction` 的反直觉行为（openai 3.x 实测）：
   `inspect.iscoroutinefunction(client.chat.completions.create)` 返回 **False**，
   但它**实际可以 await**（SDK 用了装饰器）。判断能不能 await 只能靠真 await 一次。
 """
@@ -126,8 +130,8 @@ class ChatResult:
 
     # ★ 默认空列表：绝大多数调用不是工具调用。
     #   给默认值之后，所有旧的构造点（含 FakeClient、测试里的直接构造）都不用改。
-    #   反过来说，如果哪天这里忘了解析，`tool_calls` 会**永远是空**，
-    #   业务层的循环第一轮就以为"模型没调工具" —— 接口正常、工具从没被调用。
+    #   反过来说，如果此处遗漏解析，`tool_calls` 会**永远是空**，
+    #   业务层的循环第一轮即判断「模型未调用工具」—— 接口正常、工具从未执行。
     tool_calls: list[ToolCall] = field(default_factory=list)
 
 
@@ -155,7 +159,7 @@ class LLMClient(Protocol):
 class OpenAICompatClient:
     """覆盖所有「OpenAI 兼容」端点：DeepSeek / GLM / 通义 / vLLM / Ollama。
 
-    ★ 一个类服务四家，不是偷懒 —— 它们共用同一套 HTTP 协议，
+    ★ 单个类覆盖四个供应商，理由是它们共用同一套 HTTP 协议，
       差异收敛到 Settings 的能力开关里，而不是膨胀成四个类。
     """
 
@@ -166,8 +170,9 @@ class OpenAICompatClient:
             api_key=settings.llm_api_key or "sk-not-configured",
             base_url=settings.llm_base_url,
             timeout=settings.timeout_s,
-            # ★ 必须关掉 SDK 的自动重试：它的重试会和我们的重试叠加。
-            #   SDK 2 次 × 我们 2 次 = 4 次真实调用，账单和延迟都失控。
+            # ★ 必须关掉 SDK 的自动重试：它会与业务层的重试叠加。
+            #   SDK 与业务层各自重试时，最坏 3 次 × 3 次 = 9 次真实调用
+            #   （每层 = 1 次请求 + 2 次重试），账单和延迟都失控。
             max_retries=0,
         )
 
@@ -218,7 +223,7 @@ class OpenAICompatClient:
         """逐 token 产出增量。
 
         ★ `finally` 里必须关掉上游流：客户端中途断开时，`async for` 不会自动
-          close，连接会泄漏，而且模型还在继续生成（白花钱）。
+          close，连接会泄漏，且模型仍在继续生成（产生不必要的调用费用）。
         """
         try:
             stream = await self._client.chat.completions.create(
@@ -248,7 +253,7 @@ class OpenAICompatClient:
 
 
 class FakeClient:
-    """测试用的假客户端：不联网、不花钱、结果可预测。
+    """测试用的假客户端：不联网、不产生调用费用、结果可预测。
 
     ★ 它的存在就是这套抽象的价值证明：业务层只认 `LLMClient`，
       测试时一行 `app.dependency_overrides[get_llm] = lambda: FakeClient()` 就换掉了。
@@ -327,4 +332,17 @@ def build_client(settings: Settings) -> LLMClient:
             "APP_LLM_API_KEY 未配置或仍是占位符：/chat 会返回 502，"
             "探针与会话接口不受影响。配置方法见 .env.example"
         )
+
+    if settings.llm_backend == "langchain":
+        # ★ 函数内导入：`lc_client` 反向依赖本模块的 ChatResult / LLMClient / translate，
+        #   写在文件顶部会形成循环导入。
+        # ★ 依赖缺失时这里抛 LangChainNotInstalledError（LLMError 子类），
+        #   属于**启动期失败**：配了 langchain 却没装，应该在启动时就暴露，
+        #   而不是等第一个请求进来才 502。
+        from app.client.lc_client import build_lc_client
+
+        logger.info("LLM 后端：langchain（LCEL 适配层）")
+        return build_lc_client(settings)
+
+    logger.info("LLM 后端：openai（手写实现）")
     return OpenAICompatClient(settings)

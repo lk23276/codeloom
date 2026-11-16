@@ -9,7 +9,7 @@
 ★ 为什么把 store / llm 的创建放在 lifespan 而不是模块级：
   ① 模块级会在 **import 时**就建连接——测试只要 import 一次就落地一个真实数据库文件
   ② 进程退出时要能干净关闭（`store.close()`），模块级全局没有合适的时机
-  ③ "两个 app 用两个库"在模块级下不可能，测试之间会互相污染（踩过）
+  ③ 「两个 app 用两个库」在模块级下无法实现，测试之间会互相污染
 """
 
 from __future__ import annotations
@@ -31,8 +31,10 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import request_id_var, setup_logging
 from app.core.ratelimit import KeyedLimiter, build_limiter
 from app.db.store import MessageStore
+from app.rag.rerank import Reranker, build_reranker
 from app.router import chat as chat_router
 from app.router import health as health_router
+from app.router import rag as rag_router
 from app.router import sessions as sessions_router
 
 logger = logging.getLogger(__name__)
@@ -55,17 +57,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 测试可能注入了 FakeClient —— 有就用，没有才建真实客户端
     llm = getattr(app.state, "llm", None) or build_client(settings)
     limiter: KeyedLimiter = build_limiter(settings)
+    # 重排器延迟加载：构造不下载模型，首次调用 score() 才加载约 1 GB 权重。
+    # 测试可注入替身，避免在 CI 里拉模型。
+    reranker = getattr(app.state, "reranker", None) or build_reranker(settings)
 
     app.state.store = store
     app.state.llm = llm
     app.state.ratelimit = limiter
+    app.state.reranker = reranker
     logger.info(
-        "启动完成 db=%s model=%s key=%s rate=%d/%ds",
+        "启动完成 db=%s model=%s key=%s rate=%d/%ds rerank=%s",
         settings.db_path,
         settings.llm_model,
         settings.key_preview,
         settings.rate_limit,
         settings.rate_window_s,
+        settings.rag_rerank_model,
     )
 
     try:
@@ -130,13 +137,15 @@ def create_app(
     settings: Settings | None = None,
     llm: LLMClient | None = None,
     db_path: str | None = None,
+    reranker: Reranker | None = None,
 ) -> FastAPI:
     """装配一个 app。
 
-    三个可选参数都是给测试用的：
+    四个可选参数都是给测试用的：
       - `settings`：换一套配置（比如测试里的 model 名）
-      - `llm`：注入 FakeClient，不联网、不花钱
+      - `llm`：注入 FakeClient，不联网、不产生调用费用
       - `db_path`：指向 tmp_path，避免污染真实数据库
+      - `reranker`：注入假重排器，避免在测试里下载约 1 GB 模型
     """
     cfg = settings or Settings()
     if db_path is not None:
@@ -155,6 +164,8 @@ def create_app(
     # 测试注入的 llm 先挂上；lifespan 里只在没有注入时才创建
     if llm is not None:
         app.state.llm = llm
+    if reranker is not None:
+        app.state.reranker = reranker
 
     app.middleware("http")(request_context)
     register_exception_handlers(app)
@@ -162,6 +173,7 @@ def create_app(
     app.include_router(health_router.router)
     app.include_router(sessions_router.router)
     app.include_router(chat_router.router)
+    app.include_router(rag_router.router)
 
     # ★ 同源演示页：页面和接口在同一个 origin，浏览器 fetch('/chat/stream') 不触发 CORS。
     #   这正是「方案 B」能零前端构建的原因 —— 不需要 Vite/React，也不用开跨域。

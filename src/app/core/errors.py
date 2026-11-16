@@ -1,9 +1,9 @@
 """统一错误码、统一响应体、四段异常处理器。
 
-★ 为什么 code 和 HTTP 状态要维护在同一张表里（踩坑得来的）：
+★ code 与 HTTP 状态维护在同一张表里的原因：
   如果让每个异常类自己带一个 `status` 属性，`code` 和 `status` 就成了两份独立事实，
-  改一个忘一个就会出现「code 说 NOT_FOUND、HTTP 却是 400」的自相矛盾——
-  这类 bug 不会报错，只会让前端逻辑莫名其妙。
+  改一个忘一个就会出现「code 说 NOT_FOUND、HTTP 却是 400」的自相矛盾。
+  此类缺陷不抛异常，只会让前端按错误的语义分支处理。
 
 ★ 业务码用 StrEnum：
   既能被 json.dumps 直接序列化（不需要 .value），拼错时又是 AttributeError 而不是
@@ -176,7 +176,7 @@ async def validation_handler(request: Request, exc: RequestValidationError) -> J
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     """框架抛的 HTTPException（404/405 等）→ 翻译成业务码。
 
-    ★ 必须注册 Starlette 的父类，不能注册 fastapi.HTTPException 子类（踩过的坑）：
+    ★ 必须注册 Starlette 的父类，不能注册 fastapi.HTTPException 子类：
       框架内部抛的是 Starlette 版本，注册子类命中不了，错误体就绕过统一格式了。
     """
     code = _STATUS_TO_CODE.get(exc.status_code, BizCode.INTERNAL_ERROR)

@@ -16,7 +16,7 @@
 set -uo pipefail
 
 # ★ Git Bash（MSYS2）会把 `--path /sessions` 静默改写成 Windows 路径
-#   （实测变成 D:/.../PortableGit/sessions，因为该目录存在），
+#   （实测会被改写成 Windows 侧某个同名目录的路径，因为该目录存在），
 #   结果是 5 万次 404。关掉路径转换，脚本自己保证以 `/` 开头。
 export MSYS_NO_PATHCONV=1
 

@@ -1,14 +1,14 @@
 """限流算法与接线测试。
 
-★ 这个文件守的是三类「限流看起来生效、其实没有」的错误：
+★ 这个文件覆盖三类「限流看似生效、实则失效」的缺陷：
 
-      ① 窗口边界放过 2 倍突发 —— 固定窗口的结构性 bug，只能靠时间序列断言抓
+      ① 窗口边界放过 2 倍突发 —— 固定窗口的结构性缺陷，只能靠时间序列断言检出
       ② Retry-After 写死 1 秒    —— 客户端越重试越像被封
-      ③ key 选取错误 / 桶无限增长 —— 要么一人拖垮所有人，要么限流器自己成内存炸弹
+      ③ key 选取错误 / 桶无限增长 —— 要么单个来源拖垮全部请求，要么限流器自身内存无界增长
 
 ★ 时间一律**注入**（`now=`），不 sleep：
-  限流的正确性全在时间轴上，靠真实时钟测就只能写成「等 1.1 秒」的慢测试，
-  而且边界（0.99 / 1.01）根本测不准。
+  限流的正确性全在时间轴上，用真实时钟测就只能写成「等 1.1 秒」的慢测试，
+  而且边界（0.99 / 1.01）无法精确控制。
 """
 
 from __future__ import annotations
@@ -107,15 +107,15 @@ def test_keyed_limiter_isolates_clients() -> None:
     assert limiter.check("1.1.1.1", now=0.0).allowed
     assert limiter.check("1.1.1.1", now=0.0).allowed is False
 
-    assert limiter.check("2.2.2.2", now=0.0).allowed is True
+    assert limiter.check("198.51.100.2", now=0.0).allowed is True
     assert limiter.size == 2
 
 
 def test_keyed_limiter_evicts_lru_when_full() -> None:
-    """key 数量到上限必须淘汰最久未用的 —— 没有上限的限流器就是内存炸弹。
+    """key 数量到上限必须淘汰最久未用的 —— 缺少上限的限流器会造成内存无界增长。
 
     ★ 攻击者用 100 万个 IP 打过来，每个 IP 建一个窗口；
-      没有 `max_keys` 的话，限流器自己先 OOM。
+      没有 `max_keys` 的话，限流器自身先 OOM。
     """
     limiter = KeyedLimiter(limit=5, window_s=60, max_keys=2)
 
@@ -186,16 +186,16 @@ def test_client_key_uses_peer_ip_and_ignores_xff() -> None:
     ★ 为什么专门测「忽略 XFF」：XFF 是客户端可伪造的。信它等于把限流开关
       交给攻击者 —— 每次请求换一个假 IP，就永远打不到限额。
     """
-    req = make_request("10.0.0.9", headers=[(b"x-forwarded-for", b"1.2.3.4")])
+    req = make_request("192.0.2.9", headers=[(b"x-forwarded-for", b"198.51.100.4")])
 
-    assert client_key(req) == "10.0.0.9"
+    assert client_key(req) == "192.0.2.9"
     assert client_key(make_request(None)) == "unknown"
 
 
 def test_rate_limit_dependency_raises_with_retry_after() -> None:
     """依赖超限时抛 RateLimited，并且 body/header 两处都带等待秒数。"""
     state = SimpleNamespace(ratelimit=KeyedLimiter(limit=1, window_s=60))
-    req = make_request("10.0.0.9", state=state)
+    req = make_request("192.0.2.9", state=state)
 
     rate_limit(req)  # 第 1 次放行
 

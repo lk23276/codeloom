@@ -1,0 +1,7 @@
+{"id": "N01", "question": "分析一下 A 股下周走势", "note": "完全无关：金融行情"}
+{"id": "N02", "question": "红烧肉怎么做才不腻", "note": "完全无关：烹饪"}
+{"id": "N03", "question": "我的猫连续两天不吃饭怎么办", "note": "完全无关：宠物"}
+{"id": "N04", "question": "推荐一部适合周末看的科幻电影", "note": "完全无关：影视"}
+{"id": "N05", "question": "Kafka 的 ISR 副本同步是怎么实现的", "note": "难负例：同属后端工程，语料未覆盖"}
+{"id": "N06", "question": "Redis Cluster 的槽位迁移如何保证一致性", "note": "难负例：同属后端工程，语料未覆盖"}
+{"id": "N07", "question": "MySQL 的 next-key lock 解决了什么问题", "note": "难负例：同属数据库，语料未覆盖"}

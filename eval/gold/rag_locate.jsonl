@@ -1,0 +1,8 @@
+{"id": "L01", "question": "写半包续发在哪里实现", "gold_sources": ["server2.cpp"], "gold_symbols": ["handleWrite"], "note": "代码定位，锚点出现在注释里；首命中在第 3 名"}
+{"id": "L02", "question": "eventfd 是怎么用来唤醒事件循环的", "gold_sources": ["server2.cpp"], "gold_symbols": ["eventfd"], "note": "代码定位，核心机制"}
+{"id": "L03", "question": "边沿触发是怎么设置的", "gold_sources": ["server2.cpp"], "gold_symbols": ["EPOLLET"], "note": "已知失败：自然语言问法与宏名跨度大，Top-3 未命中"}
+{"id": "L04", "question": "零拷贝发送文件用的是哪个系统调用", "gold_sources": ["server2.cpp"], "gold_symbols": ["sendfile"], "note": "问「系统调用」，答案在实现里"}
+{"id": "L05", "question": "新连接是怎么分给子反应堆的", "gold_sources": ["main.cpp", "server2.h"], "gold_symbols": ["acceptC", "getNextLoop"], "note": "同一机制有两处表述：main.cpp 注释与 server2.h 线程池实现"}
+{"id": "L06", "question": "进程收到 SIGTERM 后怎么优雅退出", "gold_sources": ["main.cpp"], "gold_symbols": ["signalfd"], "note": "跨文件：答案在 main.cpp 而非 server2.cpp"}
+{"id": "L07", "question": "LangChain 后端为什么要把 max_tokens 放进 extra_body", "gold_sources": ["ADR-7.md"], "gold_symbols": ["extra_body"], "note": "难例：全语料仅 1 块含该词"}
+{"id": "L08", "question": "服务自身开销占端到端延迟的多少", "gold_sources": ["benchmark-report.md"], "gold_symbols": ["1~2%"], "note": "难例：定量结论，全语料仅 2 块含该值"}

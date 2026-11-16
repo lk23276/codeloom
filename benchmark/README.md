@@ -7,7 +7,7 @@
 
 ## 1. 快速开始
 
-**第一步：起一个压测专用服务**（别打线上容器，也别用默认限流）
+**第一步：起一个压测专用服务**（不要对线上容器施压，也不要使用默认限流）
 
 ```bash
 cd codeloom          # 换成克隆后的目录
@@ -23,7 +23,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --no-access
 | 参数 | 为什么 |
 |---|---|
 | `APP_RATE_LIMIT=100000` | 默认 30/分钟，压测会被自己的限流挡住，测出来全是 429 |
-| `APP_DB_PATH=./data/bench.db` | 别把压测会话写进演示库 |
+| `APP_DB_PATH=./data/bench.db` | 避免压测会话写入演示库 |
 | `APP_LOG_LEVEL=WARNING` | 否则每条请求一行 JSON，日志本身成为瓶颈 |
 
 **第二步：另开一个终端跑**
@@ -70,7 +70,7 @@ uv run python benchmark/loadgen.py stream --url http://127.0.0.1:8001 --requests
 | `probe` / `sessions` | 纯本地，不计费 | 0 |
 
 - 想先验通路：`--requests 2 --concurrency 1`
-- **不要**给 `chat/stream` 传 `--duration`：脚本会拒绝（时间模式会一直烧钱）
+- **不要**给 `chat/stream` 传 `--duration`：脚本会拒绝（时间模式会持续产生调用费用）
 - 真实 token 数会写进 JSON 的 `summary.prompt_tokens / completion_tokens`，报告里直接可见
 
 ---
@@ -103,28 +103,28 @@ delta 均值几十~几百        -> 真流式
 delta 间隔 P95 很大        -> 上游按段推，或网络抖动
 ```
 
-> 我们的实测基线：「你好」→ **179 个 delta**；`/chat` 约 2.3 秒、444/114 tokens。
+> 实测基线：「你好」→ **179 个 delta**；`/chat` 约 2.3 秒、444/114 tokens。
 
 ---
 
-## 5. 已知边界（写进报告，别藏着）
+## 5. 已知边界（应写入报告）
 
 1. **单进程**：`--workers 1`，SQLite 锁与限流器都是进程内状态。数字代表单机，不是集群。
-2. **压测器是 Python**：本机 probe 组大约在几千 RPS 量级会先撞到客户端瓶颈。
-   要极限值用 `wrk2 -t4 -c200 -d30s -R2000 http://127.0.0.1:8001/healthz` 复核。
+2. **压测器是 Python**：本机 probe 组大约在几千 RPS 量级会先触及客户端瓶颈。
+   需要极限值用 `wrk2 -t4 -c200 -d30s -R2000 http://127.0.0.1:8001/healthz` 复核。
 3. **关环而不是开环**：每个 worker 串行发，N 并发 = N 个在途请求。
-   LLM 场景下开环（固定 RPS）会把排队藏在客户端，数字好看但失真。
+   LLM 场景下开环（固定 RPS）会把排队藏在客户端，数字偏高但失真。
 4. **代理**：脚本默认 `trust_env=False`（不读 `HTTP_PROXY`）。
-   这台机器配了代理，本地请求走代理会把 0.3ms 测成 200ms。
-5. **限流组单独测**：想知道 429 行为，就别改 `APP_RATE_LIMIT`，
-   用 `--requests 40 --concurrency 1` 打默认 30/分钟的服务，看 `retry_after_seen`。
+   若运行环境配置了代理，本地请求经代理会把 0.3ms 测成 200ms。
+5. **限流组单独测**：需要验证 429 行为时，不要覆盖 `APP_RATE_LIMIT`，
+   用 `--requests 40 --concurrency 1` 打默认 30/分钟的服务，观察 `retry_after_seen`。
 
 ---
 
 ## 6. 这组数据说明什么（一句话版）
 
 > 压测分三组：本地能力、端到端、流式。
-> 本地组用关环并发测框架与 SQLite；端到端组的瓶颈在上游生成，所以我只看 429 与 token 成本；
+> 本地组用关环并发测框架与 SQLite；端到端组的瓶颈在上游生成，因此该组只看 429 与 token 成本；
 > 流式组看 TTFB 和 delta 间隔——delta 均值只有 1 就说明是假流式。
 > 单进程是刻意的：SQLite 锁和限流器都是进程内状态，扩容要先换 Postgres 和 Redis。
 

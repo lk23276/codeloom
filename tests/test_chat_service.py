@@ -1,18 +1,18 @@
 """ChatService 的关键路径测试。
 
-★ 这个文件测的不是「覆盖率」，是**十类不会报错的错误**。
-  它们共同的特点：程序不崩、状态码正常、字段名也对，只是悄悄做错事。
+★ 这个文件覆盖的不是「行数占比」，而是**十类不抛异常的失败**。
+  它们共同的特征：进程不崩、状态码正常、字段名也正确，只是结果错误。
 
       ① 顺序错：先调模型再落库        -> 用户的问题会丢（只有读代码才发现）
       ② 不拼历史：多轮等于单轮        -> 模型"失忆"，但接口照样 200
-      ③ usage 丢失：字段名写错大小写   -> 成本统计全 0（真实踩过）
+      ③ usage 丢失：字段名写错大小写   -> 成本统计全 0（实测发生过）
       ④ 静默新建：拼错 session_id     -> 200 但开了个新会话（决策是 404）
       ⑤ 异常没翻译：LLMError 直接冒   -> router 接不住，流断在半路
       ⑥ 流式分段/顺序错：拼接后才发现 -> 逐字断言才看得出来
       ⑦ 流式异常不翻译：同上           -> 客户端既没 error 也没 done
       ⑧ 流式 404 拖进生成器           -> 状态码从 404 变成 200
       ⑨ 假流式：先收完再吐            -> 用户等全部生成完，需按时序断言
-      ⑩ 重复注入 system               -> prompt 变长、每轮白花钱
+      ⑩ 重复注入 system               -> prompt 变长、每轮产生额外费用
 
 用法：
     uv run pytest tests/test_chat_service.py -q
@@ -54,7 +54,7 @@ def make_service(
     reply: str = "假回复",
     chunks: list[str] | None = None,
 ) -> tuple[ChatService, FakeClient]:
-    """造一个「不联网、不花钱、结果可预测」的 service。"""
+    """造一个「不联网、不产生调用费用、结果可预测」的 service。"""
     llm = FakeClient(reply=reply, chunks=chunks)
     return ChatService(llm=llm, store=store), llm
 
@@ -148,7 +148,7 @@ async def test_chat_propagates_usage(store: MessageStore) -> None:
     ★ 这是一个真实 bug 的回归测试：
       构造 `ChatAnswer` 时把字段名写成 `Usage=`（大写），Pydantic 默认
       `extra="ignore"` 会**直接丢弃**这个多余参数，而 `usage` 有默认值，
-      于是安静地变成 0 —— 不报错、不告警、接口结构全对。
+      于是被静默置为 0 —— 不报错、不告警、接口结构完全正确。
 
       FakeClient 固定返回 10 / 5 / 15，所以断言具体数值就能卡住它。
     """
@@ -169,7 +169,7 @@ async def test_chat_unknown_session_raises_not_found(store: MessageStore) -> Non
 
     ★ 设计决策：`ensure_conversation` 内部是 `INSERT OR IGNORE`，
       直接用会把「客户端拼错 id」伪装成 200。所以先判存在性。
-      断言 `conversation_exists` 为 False，就是验证「没有偷偷写库」。
+      断言 `conversation_exists` 为 False，即验证「未发生任何写入」。
     """
     svc, llm = make_service(store)
 
@@ -177,7 +177,7 @@ async def test_chat_unknown_session_raises_not_found(store: MessageStore) -> Non
         await svc.chat(ChatRequest(message="hi", session_id="typo123"))
 
     assert store.conversation_exists("typo123") is False
-    assert llm.calls == [], "校验失败时不应该调模型（别白花钱）"
+    assert llm.calls == [], "校验失败时不应该调模型（避免产生费用）"
 
 
 # ══════════════════════ ⑤ 上游异常翻译 + 保留 user ══════════════════════
@@ -319,7 +319,7 @@ async def test_build_messages_skips_duplicate_system(store: MessageStore) -> Non
 
     ★ 这条守的是**成本**不是正确性：system 提示每轮都发，如果历史里
       存过一条又追加一条，prompt 会多出一整段 —— 接口照样正常，
-      只是每轮都白花钱。属于「不报错的浪费」。
+      只是每轮都产生不必要的费用。属于「不报错的浪费」。
     """
     session_id = store.ensure_conversation(None)
     store.append(session_id, "system", "旧的系统提示")
@@ -339,7 +339,7 @@ async def test_build_messages_skips_duplicate_system(store: MessageStore) -> Non
 async def test_chat_executes_tool_calls_and_returns_final_answer(store: MessageStore) -> None:
     """模型要求调工具时，必须真的执行、按 id 配对回传，再拿第二次的回答。
 
-    ★ 这条一次守住五件事，每一件破了都不报错：
+    ★ 这条一次守住五件事，每一件被破坏时都不报错：
       1. assistant 的 "工具申请单" **原样带回**（含 `content` 空串）——
          少了 `tool_calls`，下一条 tool 消息就没有归属
       2. `tool_call_id` **一一对应**且顺序不乱 —— 错位不报错，但答案会串
@@ -347,7 +347,7 @@ async def test_chat_executes_tool_calls_and_returns_final_answer(store: MessageS
       4. `usage` **逐轮累加** —— 只算最后一轮就是少报成本
       5. 只有最终回答落库 —— 中间的 tool 消息不进数据库
 
-    ★ `tools` 每轮都要传（它不在 messages 里，少一轮模型就"忘了会工具"），
+    ★ `tools` 每轮都要传（它不在 messages 里，少传一轮模型即认为无可用工具），
       所以用 RecordingClient 记 kwargs，而不是只看 messages。
     """
     llm = RecordingClient(
@@ -433,8 +433,8 @@ async def test_chat_returns_fallback_when_tool_steps_exhausted(store: MessageSto
       上面第 ⑪ 条仍然通过（那条会 break），只有这条能抓到 ——
       表现是返回了空字符串或上一轮的残留文本，接口照样 200。
 
-    ★ 断言"模型只被调了 3 次"：脚本故意多给一轮，证明不会偷偷跑第 4 次。
-      少调一次是省钱问题，多调一次是**死循环**问题。
+    ★ 断言"模型只被调了 3 次"：脚本故意多给一轮，证明不会执行第 4 轮。
+      少调一次是成本问题，多调一次是**死循环**问题。
     """
     llm = RecordingClient(
         script=[

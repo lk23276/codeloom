@@ -4,8 +4,8 @@
   业务层拿到的是 Protocol 类型，所以它永远不知道背后是 DeepSeek 还是 FakeClient。
 
 ★ 为什么用 `request.app.state` 而不是模块级全局：
-  踩过的坑——模块级全局会让「两个 app 用两个库」变成不可能，
-  测试之间互相污染。放进 app.state 后每个 app 实例各自独立。
+  模块级全局会让「两个 app 用两个库」无法实现，测试之间互相污染；
+  放进 app.state 后每个 app 实例各自独立。
 
 ★ 类型标注写 Protocol（`LLMClient`）而不是具体类（`OpenAICompatClient`）：
   这样测试里 `app.dependency_overrides[get_llm] = lambda: FakeClient()` 就能换掉，
@@ -20,6 +20,7 @@ from app.client.llm import LLMClient
 from app.core.config import Settings
 from app.db.store import MessageStore
 from app.service.chat_service import ChatService
+from app.service.rag_service import RagService
 
 
 def get_settings(request: Request) -> Settings:
@@ -46,3 +47,23 @@ def get_chat_service(request: Request) -> ChatService:
     轻量对象每次新建比维护单例更简单，也不用担心跨请求的状态污染。
     """
     return ChatService(llm=get_llm(request), store=get_store(request))
+
+
+def get_rag_service(request: Request) -> RagService:
+    """知识库问答服务。
+
+    与 `ChatService` 的区别：它多一个重排器，而重排器**进程内复用**
+    （模型约 1 GB，每次请求重建等于反复加载）。重排器本身是延迟加载的，
+    所以这里只是取一个共享引用，不会触发模型下载。
+
+    三个阈值/条数从 `Settings` 读，便于用环境变量调整而不改代码 ——
+    拒答阈值本来就需要在标注集上反复标定。
+    """
+    cfg = get_settings(request)
+    return RagService(
+        llm=get_llm(request),
+        reranker=request.app.state.reranker,
+        recall_k=cfg.rag_recall_k,
+        top_n=cfg.rag_top_k,
+        min_score=cfg.rag_min_rerank_score,
+    )

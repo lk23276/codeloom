@@ -1,6 +1,6 @@
 """CodeLoom（码络）· 可溯源的多 Agent 工程知识助手。
 
-v0.1 的包结构：
+v0.5 的包结构：
     app.core     配置 / 装配 / 错误契约 / 限流 / 结构化日志 / SSE 帧
     app.schema   Pydantic 契约
     app.db       SQLite 存储
@@ -9,6 +9,7 @@ v0.1 的包结构：
     app.router   HTTP 路由
     app.prompts  提示词
     app.tools    Function Calling 工具注册表
+    app.rag      语料切分 / 向量检索 / 重排 / 提示词
 """
 
-VERSION = "0.1.0"
+VERSION = "0.5.0"

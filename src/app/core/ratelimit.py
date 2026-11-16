@@ -2,8 +2,8 @@
 
 ★ 为什么手写而不是 slowapi：
   本项目只需要「按 IP 限 /chat」这一条规则，引入一个框架等于为一个函数装一套机制；
-  更要紧的是**限流的坑都在语义上**（窗口边界、Retry-After 精度、key 的选取），
-  这些坑只有真正实现过才会暴露。
+  更关键的是**限流的难点在语义层面**（窗口边界、Retry-After 精度、key 的选取），
+  这些问题只有完整实现一遍才会暴露。
 
 ★ 为什么选「滑动窗口」而不是令牌桶：
   令牌桶允许突发，适合「用户平时不用、一用就连点」的产品；本项目的对话接口
@@ -115,7 +115,7 @@ class KeyedLimiter:
     """每个 key 一个窗口，带 LRU 上限。
 
     ★ `max_keys` 不是可选项：没有它，攻击者用 100 万个不同 IP 打过来，
-      就会为每个 IP 建一个窗口 —— **限流器自己变成内存炸弹**。
+      就会为每个 IP 建一个窗口 —— **限流器自身成为无界增长的内存占用**。
       这是限流实现里最常见的漏洞。
 
     ★ 用 LRU 而不是 TTL 定时清理：一个 OrderedDict 就够，
@@ -182,7 +182,7 @@ def rate_limit(request: Request) -> None:
     wait = max(1, math.ceil(decision.retry_after_s))
     raise RateLimited(
         f"请求过于频繁，请 {wait} 秒后重试",
-        # ★ 字段名与 design.md §4.2 的错误示例一致
+        # ★ 字段名 `retry_after_s` 与 429 响应的 data 契约一致
         data={"retry_after_s": wait},
         # 429 也要给标准头：网关和客户端库会直接读 Retry-After 做退避
         headers=decision.headers(),

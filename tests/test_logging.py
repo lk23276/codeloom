@@ -81,7 +81,7 @@ def test_json_formatter_keeps_traceback_in_single_field() -> None:
         _ = 1 / 0
     except ZeroDivisionError:
         record = logging.LogRecord(
-            "app.test", logging.ERROR, __file__, 1, "炸了", (), sys.exc_info()
+            "app.test", logging.ERROR, __file__, 1, "测试异常", (), sys.exc_info()
         )
 
     RequestIdFilter().filter(record)
