@@ -157,7 +157,8 @@ curl -s -X POST localhost:8000/rag/ask \
 - `invalid_citations` 统计模型引用了不存在的编号。非零表示提示词或块数异常，不会让请求失败。
 - `refused=true` 时 HTTP 仍为 200，且 `usage` 全为 0：拒答发生在调用模型之前。
 
-`max_tokens` 默认 500。实测 300 会在小节中途截断（判据是 `completion_tokens` 正好等于上限）。
+`max_tokens` 默认 800。上限只限制长度、不产生额外调用；判据是 `completion_tokens` 正好等于上限，
+此时正文通常停在半句或代码块中间（300 与 500 都实测过截断）。
 
 ### 评测基线
 

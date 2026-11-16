@@ -24,8 +24,9 @@ class RagRequest(BaseModel):
         description="进入上下文的块数；不传则用服务端配置值",
     )
 
-    # 默认 500：检索增强的回答带引用与小段代码，300 会在小节中途截断。
-    max_tokens: int = Field(default=500, ge=1, le=1000, description="输出 token 上限")
+    # 默认 800：检索增强的回答带引用与小段代码，实测「解释一个机制」这类问题
+    # 在 500 处会停在代码块中间。上限只限制长度，不产生额外调用。
+    max_tokens: int = Field(default=800, ge=1, le=1000, description="输出 token 上限")
 
 
 class Citation(BaseModel):
