@@ -281,12 +281,18 @@ curl.exe -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: applicat
 
 ### 浏览器演示页
 
-服务起来后打开 `http://127.0.0.1:8000/demo/`（容器映射的 8000 也一样）：
+两个页面都由同一个 FastAPI 提供，同源、单文件、零构建：
+
+| 页面 | 地址 | 演示什么 |
+|---|---|---|
+| 流式问答 | `http://127.0.0.1:8000/demo/` | 逐字渲染，显示首字耗时 / 总耗时 / delta 帧数 |
+| 知识库问答 | `http://127.0.0.1:8000/demo/rag.html` | 带行号的引用、点编号跳转、拒答状态与重排分数 |
 
 - 输入一句话 → **逐字渲染**，页面上直接显示「首字耗时 / 总耗时 / delta 帧数」
 - 页面和接口**同一个 origin**（`GET /demo/` 由同一个 FastAPI 提供），所以
   `fetch('/chat/stream')` 不会触发 CORS —— 这是不需要 Vite/React 的原因
-- 单文件、零依赖：`src/app/static/index.html`；`html=True` 让 `/demo/` 直接返回它
+- 单文件、零依赖：`src/app/static/index.html` 与 `src/app/static/rag.html`；
+  `html=True` 让 `/demo/` 直接返回 `index.html`
 
 ![CodeLoom 流式演示](docs/demo.gif)
 
@@ -523,7 +529,7 @@ codeloom/
 │   ├── db/store.py             # SQLite(WAL) 会话与消息
 │   ├── schema/                 # chat.py / rag.py（Pydantic 契约）
 │   ├── prompts/system.py       # 对话系统提示词
-│   ├── static/index.html       # 演示页（/demo/，同源，零构建）
+│   ├── static/                 # 演示页：index.html（流式）/ rag.html（知识库问答）
 │   └── agent|mcp_server|obs    # v1.0 预留
 ├── tests/                      # 160 例
 ├── benchmark/                  # 压测：loadgen.py（probe/chat/stream）+ run.sh

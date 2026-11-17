@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeLoom · 知识库问答</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    background: #f6f7f9; color: #1f2328;
+    font: 15px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  main { width: min(820px, 92vw); padding: 40px 0 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 20px; font-size: 13px; }
+  .sub code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  .row { display: flex; gap: 8px; }
+  input {
+    flex: 1; padding: 10px 12px; font: inherit; color: inherit;
+    border: 1px solid #d0d7de; border-radius: 8px; background: #fff;
+  }
+  input:focus { outline: 2px solid #0969da33; border-color: #0969da; }
+  button {
+    padding: 10px 18px; font: inherit; font-weight: 600; color: #fff;
+    background: #0969da; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  button:disabled { background: #9db8d6; cursor: not-allowed; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+  .chip {
+    padding: 5px 10px; font-size: 12px; color: #0969da; cursor: pointer;
+    background: #ddf4ff; border: 1px solid #b6e3ff; border-radius: 999px;
+  }
+  .chip:hover { background: #bce6ff; }
+
+  .meta {
+    display: flex; gap: 18px; flex-wrap: wrap; margin: 18px 0 10px;
+    font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums;
+  }
+  .meta b { color: #1f2328; font-weight: 600; }
+  .meta .ok { color: #1a7f37; }
+  .meta .bad { color: #cf222e; }
+
+  .card {
+    padding: 18px 20px; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 10px;
+  }
+  .card + .card { margin-top: 12px; }
+  .card h2 { font-size: 13px; font-weight: 600; color: #6b7280; margin: 0 0 10px; }
+
+  .answer { white-space: normal; word-break: break-word; }
+  .answer h3 { font-size: 16px; margin: 18px 0 8px; }
+  .answer h4 { font-size: 14px; margin: 16px 0 6px; color: #24292f; }
+  .answer p { margin: 0 0 10px; }
+  .answer ul, .answer ol { margin: 0 0 10px; padding-left: 22px; }
+  .answer li { margin: 2px 0; }
+  .answer code {
+    background: #eef1f4; padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+  }
+  .answer pre {
+    margin: 10px 0; padding: 12px 14px; overflow-x: auto;
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px;
+  }
+  .answer pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.55; }
+
+  sup.cite {
+    display: inline-block; min-width: 16px; margin: 0 1px; padding: 0 4px;
+    font-size: 11px; font-weight: 600; line-height: 16px; text-align: center;
+    color: #fff; background: #0969da; border-radius: 4px; cursor: pointer;
+    vertical-align: super;
+  }
+  sup.cite:hover { background: #0a4f9e; }
+
+  .refused { border-color: #f0c2c2; background: #fff8f8; }
+  .refused .why { color: #cf222e; font-weight: 600; }
+  .refused .hint { color: #6b7280; font-size: 13px; margin-top: 6px; }
+
+  ol.cites { margin: 0; padding-left: 0; list-style: none; }
+  ol.cites li {
+    padding: 6px 8px; border-radius: 6px; font-size: 13px;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  ol.cites li + li { margin-top: 2px; }
+  ol.cites li.flash { background: #fff8c5; }
+  ol.cites .idx { font-weight: 600; color: #0969da; min-width: 26px; }
+  ol.cites code {
+    background: #eef1f4; padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  ol.cites .score { margin-left: auto; color: #6b7280; font-variant-numeric: tabular-nums; }
+
+  .warn { margin-top: 10px; font-size: 12px; color: #9a6700; }
+
+  details { margin-top: 12px; font-size: 12px; color: #6b7280; }
+  details pre {
+    margin: 8px 0 0; padding: 12px; overflow-x: auto; max-height: 320px;
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px;
+    font-size: 12px; line-height: 1.5;
+  }
+  #err {
+    display: none; margin-top: 12px; padding: 12px 14px; font-size: 13px;
+    color: #cf222e; background: #fff8f8;
+    border: 1px solid #f0c2c2; border-radius: 8px;
+  }
+  footer { margin-top: 22px; font-size: 12px; color: #6b7280; }
+  footer a { color: #0969da; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CodeLoom · 知识库问答</h1>
+  <p class="sub">
+    检索 <code>139</code> 个语料块 → cross-encoder 精排 → 回答带 <code>文件:行号</code> 引用；
+    依据不足时直接拒答，不调用模型。
+  </p>
+
+  <div class="row">
+    <input id="q" value="eventfd 是怎么用来唤醒事件循环的" maxlength="2000"
+           placeholder="问一个与语料相关的问题，回车提问">
+    <button id="send">提问</button>
+  </div>
+
+  <div class="chips">
+    <span class="chip" data-q="eventfd 是怎么用来唤醒事件循环的">eventfd 唤醒机制</span>
+    <span class="chip" data-q="写半包续发在哪里实现">半包续发在哪</span>
+    <span class="chip" data-q="零拷贝发送文件用的是哪个系统调用">零拷贝用哪个调用</span>
+    <span class="chip" data-q="分析一下 A 股下周走势">无关问题（演示拒答）</span>
+  </div>
+
+  <div class="meta">
+    <span>状态 <b id="status">—</b></span>
+    <span>最高分 <b id="score">—</b></span>
+    <span>召回 → 精排 <b id="funnel">—</b></span>
+    <span>耗时 <b id="elapsed">—</b></span>
+    <span>tokens <b id="tokens">—</b></span>
+  </div>
+
+  <div id="panel"></div>
+  <div id="err"></div>
+
+  <details>
+    <summary>查看原始响应</summary>
+    <pre id="raw">（尚未发起请求）</pre>
+  </details>
+
+  <footer>
+    接口文档 <a href="/docs">/docs</a> ·
+    健康检查 <a href="/healthz">/healthz</a> ·
+    流式演示 <a href="/demo/">/demo/</a>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const panel = $("panel");
+const errBox = $("err");
+let busy = false;
+
+// ── 极简 Markdown 渲染：只支持代码块、行内代码、粗体、标题、段内换行 ──
+// 先转义再替换，避免模型输出里的尖括号被当成标签执行。
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderAnswer(text) {
+  const blocks = [];
+  // 先把围栏代码块挖出来，避免其中的 # 和 * 被误当成标题/粗体
+  const body = esc(text).replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    blocks.push(`<pre><code data-lang="${lang}">${code.replace(/\n$/, "")}</code></pre>`);
+    return `\u0000${blocks.length - 1}\u0000`;
+  });
+
+  const lines = body.split("\n");
+  let out = "";
+  let list = [];
+  let listTag = "ul";
+
+  const flush = () => {
+    if (!list.length) return;
+    out += `<${listTag}>${list.map((x) => `<li>${x}</li>`).join("")}</${listTag}>`;
+    list = [];
+  };
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { flush(); continue; }
+    // 代码块占位独占一行时必须原样输出：包进 <p> 会形成 <p><pre> 的非法嵌套
+    if (/^\u0000\d+\u0000$/.test(t)) { flush(); out += t; continue; }
+
+    const bullet = /^[-*]\s+/.exec(t);
+    const numbered = /^\d+[.)]\s+/.exec(t);
+    if (bullet || numbered) {
+      const tag = bullet ? "ul" : "ol";
+      // 列表类型切换时先收尾，避免 <ul> 里混进 <li> from <ol>
+      if (list.length && tag !== listTag) flush();
+      listTag = tag;
+      list.push(inline(t.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "")));
+      continue;
+    }
+
+    flush();
+    if (/^#{1,3}\s+/.test(t)) {
+      const level = (t.match(/^#+/)[0].length >= 3) ? 4 : 3;
+      out += `<h${level}>${inline(t.replace(/^#{1,3}\s+/, ""))}</h${level}>`;
+    } else {
+      out += `<p>${inline(t)}</p>`;
+    }
+  }
+  flush();
+
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[Number(i)]);
+}
+
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[(\d{1,3})\]/g, '<sup class="cite" data-i="$1">$1</sup>');
+}
+
+function reset() {
+  panel.innerHTML = "";
+  errBox.style.display = "none";
+  $("status").textContent = "—";
+  $("status").className = "";
+  $("score").textContent = "—";
+  $("funnel").textContent = "—";
+  $("elapsed").textContent = "—";
+  $("tokens").textContent = "—";
+}
+
+function fail(msg, detail) {
+  errBox.style.display = "block";
+  errBox.innerHTML = `<strong>请求失败</strong>：${esc(msg)}` +
+    (detail ? `<div style="margin-top:6px;color:#6b7280">${esc(detail)}</div>` : "");
+}
+
+async function ask() {
+  if (busy) return;
+  busy = true;
+  $("send").disabled = true;
+  reset();
+
+  const t0 = performance.now();
+  try {
+    const resp = await fetch("/rag/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: $("q").value }),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    $("raw").textContent = JSON.stringify(body, null, 2);
+
+    if (!resp.ok) {
+      const hint = resp.status === 502
+        ? "上游模型不可用：检查 .env 里的 APP_LLM_API_KEY"
+        : resp.status === 429
+          ? "触发限流：默认 30 次/分钟，稍后再试"
+          : "";
+      fail(`${resp.status} ${body.code || ""} ${body.msg || ""}`.trim(), hint);
+      return;
+    }
+
+    const d = body.data;
+    $("elapsed").textContent = Math.round(performance.now() - t0) + " ms";
+    $("score").textContent = d.top_score === null ? "—" : Number(d.top_score).toFixed(4);
+    $("funnel").textContent = `${d.recalled} → ${d.reranked}`;
+
+    if (d.refused) {
+      $("status").textContent = "已拒答";
+      $("status").className = "bad";
+      $("tokens").textContent = "0（未调用模型）";
+      panel.innerHTML = `
+        <div class="card refused">
+          <h2>拒答</h2>
+          <div class="why">${esc(d.reason || "知识库中无相关依据")}</div>
+          <div class="hint">
+            最高重排分 ${Number(d.top_score).toFixed(4)}，低于阈值；
+            本次未产生模型调用（usage 全为 0）。
+          </div>
+        </div>`;
+      return;
+    }
+
+    $("status").textContent = "已作答";
+    $("status").className = "ok";
+    $("tokens").textContent = d.usage
+      ? `${d.usage.prompt_tokens} / ${d.usage.completion_tokens}`
+      : "—";
+
+    const cites = (d.citations || []).map((c) => `
+      <li id="cite-${c.index}">
+        <span class="idx">[${c.index}]</span>
+        <code>${esc(c.source)}:${c.line_start}-${c.line_end}</code>
+        <span class="score">${Number(c.score).toFixed(4)}</span>
+      </li>`).join("");
+
+    panel.innerHTML = `
+      <div class="card">
+        <h2>回答</h2>
+        <div class="answer">${renderAnswer(d.answer || "")}</div>
+        ${d.invalid_citations > 0
+          ? `<div class="warn">模型引用了 ${d.invalid_citations} 个不存在的编号，已丢弃。</div>`
+          : ""}
+      </div>
+      <div class="card">
+        <h2>引用（${(d.citations || []).length} 处，位置来自语料 metadata）</h2>
+        <ol class="cites">${cites || '<li class="idx">无引用</li>'}</ol>
+      </div>`;
+
+    // 点正文里的 [n] 跳到对应引用并高亮
+    panel.querySelectorAll("sup.cite").forEach((el) => {
+      el.addEventListener("click", () => {
+        const target = panel.querySelector(`#cite-${el.dataset.i}`);
+        if (!target) return;
+        target.scrollIntoView({ block: "center" });
+        target.classList.add("flash");
+        setTimeout(() => target.classList.remove("flash"), 1200);
+      });
+    });
+  } catch (e) {
+    fail(e.message || String(e));
+  } finally {
+    $("send").disabled = false;
+    busy = false;
+  }
+}
+
+$("send").addEventListener("click", ask);
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    $("q").value = chip.dataset.q;
+    ask();
+  });
+});
+</script>
+</body>
+</html>
