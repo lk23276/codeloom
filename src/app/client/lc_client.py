@@ -74,6 +74,34 @@ def _lc() -> SimpleNamespace:
     )
 
 
+def build_chat_model(settings: Settings) -> Any:
+    """构造一个配置好的 `ChatOpenAI`。**唯一的构造点**。
+
+    ★ 为什么单独抽出来：LangGraph 的节点需要直接持有 chat model（自己 `bind_tools`、
+    自己 `ainvoke`），不经过 `LangChainClient`。若在那里再写一份构造参数，
+    `base_url` / `api_key` / `max_retries` / 思考开关 就会出现两处定义 ——
+    这种重复不会报错，只会在某天一边改了另一边没改时，表现为
+    「图里的模型行为和 /chat 不一致」。
+
+    ★ 思考模式在**构造期**就要定型：图里的模型由 LangGraph 直接调用，
+    没有 `_call_kwargs` 这个中间层可以补 `extra_body`；不设就会走服务端默认。
+    """
+    lc = _lc()
+    return lc.ChatOpenAI(
+        # model / base_url / api_key 是别名，对应 model_name / openai_api_base / openai_api_key
+        model=settings.llm_model,
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key or "sk-not-configured",
+        temperature=0.0,
+        request_timeout=settings.timeout_s,
+        # ★ 与手写实现一致：关掉 SDK 自动重试，避免与业务层重试叠加
+        max_retries=0,
+        # 流式路径的用量依赖该开关：部分供应商默认不在流式响应中返回 usage
+        stream_usage=True,
+        extra_body={"thinking": {"type": "enabled" if settings.llm_thinking else "disabled"}},
+    )
+
+
 # ══════════════════════ 二、结果映射 ══════════════════════
 
 
@@ -161,18 +189,8 @@ class LangChainClient:
         lc = _lc()
         self.model = settings.llm_model
         self._thinking = settings.llm_thinking
-        self._chat = lc.ChatOpenAI(
-            # model / base_url / api_key 是别名，对应 model_name / openai_api_base / openai_api_key
-            model=settings.llm_model,
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key or "sk-not-configured",
-            temperature=0.0,
-            request_timeout=settings.timeout_s,
-            # ★ 与手写实现一致：关掉 SDK 自动重试，避免与业务层重试叠加
-            max_retries=0,
-            # 流式路径的用量依赖该开关：部分供应商默认不在流式响应中返回 usage
-            stream_usage=True,
-        )
+        # 构造参数集中在 build_chat_model()：图路径与本类共用同一份定义
+        self._chat = build_chat_model(settings)
         # 流式链只做「模型 → 纯文本」，不含 usage；
         # 需要 usage 或工具调用时走 achat，拿原始 AIMessage。
         self._stream_chain = self._chat | lc.StrOutputParser()

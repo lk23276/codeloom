@@ -1,0 +1,5 @@
+{"id": "T01", "question": "12*7 等于几", "tool": "calculator", "expect_tool_output": "84"}
+{"id": "T02", "question": "(12+5)*3 等于多少", "tool": "calculator", "expect_tool_output": "51"}
+{"id": "T03", "question": "2 的 40 次方是多少", "tool": "calculator", "expect_tool_output": "1099511627776"}
+{"id": "T04", "question": "123456789 乘以 987654321 等于多少", "tool": "calculator", "expect_tool_output": "121932631112635269"}
+{"id": "T05", "question": "87654321 除以 1234 的整数商是多少", "tool": "calculator", "expect_tool_output": "71032"}

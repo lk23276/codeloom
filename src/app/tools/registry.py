@@ -155,6 +155,10 @@ def _calculator(expression: str) -> str:
     if not expression or len(expression) > MAX_EXPRESSION_CHARS:
         raise ValueError("表达式为空或过长")
     value = _eval(ast.parse(expression, mode="eval"))
+    # ★ 整数必须先处理：`.10g` 是「10 位有效数字」，对 int 会转成浮点按科学计数法输出，
+    #   `2**40` 会得到 "1.099511628e+12"（丢精度）。整数没有精度问题，直接 str。
+    if isinstance(value, int):
+        return str(value)
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return format(value, ".10g")
