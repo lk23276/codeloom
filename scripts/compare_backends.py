@@ -103,7 +103,7 @@ async def ask(client: LLMClient, case: Case, max_tokens: int) -> Answer:
         )
     except LLMError as exc:
         return Answer(ok=False, error=f"{type(exc).__name__}: {exc}")
-    except Exception as exc:  # noqa: BLE001 —— 脚本要跑完整轮，不能因单条崩掉
+    except Exception as exc:  # noqa: BLE001 —— 脚本要跑完整轮，不能因单条失败而中断
         return Answer(ok=False, error=f"{type(exc).__name__}: {exc}")
 
     return Answer(

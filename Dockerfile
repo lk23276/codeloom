@@ -66,7 +66,7 @@ COPY --from=deps --chown=appuser:appuser /app/.venv /app/.venv
 #   · 少一步构建，也少一个「构建期需要 README.md」的隐藏依赖
 #   · 目录结构和仓库里完全一致，容器里读日志/调试时不用换算路径
 # ★ 这里拷的是**整个 src/app**，不是「用到哪几个文件拷哪几个」——
-#   踩过的坑：运行时 import 闭包（函数内 import）静态查不出来，漏一个就启动即崩。
+#   注意：运行时 import 闭包（函数内 import）静态查不出来，漏一个就会在启动时失败。
 COPY src ./src
 
 # 运行时要写的唯一位置。空目录，chown 是 O(1)，不会像 venv 那样遍历几万个文件。

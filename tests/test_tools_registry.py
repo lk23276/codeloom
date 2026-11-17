@@ -1,7 +1,7 @@
 """工具注册表的关键路径测试（Function Calling）。
 
 ★ 这个文件守的不是「覆盖率数字」，是**工具层的四条契约**。
-  它们共同的特点：被破坏时也不崩，只是模型拿到的东西不对，最后答案随之变差。
+  它们共同的特点：被破坏时也不退出，只是模型拿到的东西不对，最后答案随之变差。
 
       ① 正常路径      -> 表达式算对、格式稳定（`4/2` 是 "2" 不是 "2.0"）
       ② 危险输入      -> 绝不 `eval`、绝不执行，只回错误文本
@@ -161,7 +161,7 @@ def test_dispatch_rejects_bad_arguments(arguments: str, needle: str) -> None:
     ],
 )
 def test_dispatch_turns_exceptions_into_text(expression: str, needle: str) -> None:
-    """工具执行失败 -> `ok: false` + 异常类名，**请求不崩**。
+    """工具执行失败 -> `ok: false` + 异常类名，**请求不失败**。
 
     ★ `except Exception` 在 dispatch 里是**故意的**：工具是"不可信输入的
       执行现场"，除零、溢出、格式错都可能发生，全都该由模型转述给用户，

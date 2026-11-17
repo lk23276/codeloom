@@ -31,7 +31,7 @@ FC 要求 `ChatResult` 能带回「模型想调哪个工具、参数是什么」
             name: str
             arguments: str     # ★ 是 JSON **字符串**，不是 dict（SDK 原样给的就是字符串）
 
-  ② `ChatResult` 加字段（要有默认值，否则所有旧构造点全崩）：
+  ② `ChatResult` 加字段（要有默认值，否则所有旧构造点都会失败）：
 
         tool_calls: list[ToolCall] = field(default_factory=list)
 
@@ -271,7 +271,7 @@ def dispatch(name: str, arguments: str) -> str:
          `try: return fn(**validated.model_dump())`
          `except Exception as exc: return f"error: {type(exc).__name__}: {exc}"`
          ★ 用 `except Exception` 是**故意的**：工具是"不可信输入的执行现场"，
-           除零、溢出、格式错都可能发生，全都该由模型转述，而不是让请求崩掉
+           除零、溢出、格式错都可能发生，全都该由模型转述，而不是让请求失败
 
       ⑤ 截断
          结果超过 `MAX_RESULT_CHARS` 就截断并注明 `... (已截断)`
