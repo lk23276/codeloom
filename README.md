@@ -106,15 +106,33 @@ CodeLoom = 在这套底层认知上盖的 Python + LLM 应用层
 粗召回负责不漏，精排负责排准。**精排只能重排候选集里已有的块** —— 候选里没有正确答案时，
 再准的重排也无法补救，所以 `Hit@recall` 是整条链路的天花板。
 
-### 建立索引
+### 准备语料：三步
+
+1. **放文件** —— 把源码与文档放进 `data/corpus/raw/`
+   支持 `.cpp` `.cc` `.c` `.h` `.hpp` `.md` `.markdown`，子目录递归扫描。
+   文件名不要用中文或空格：它会进引用，出现在回答里。
+2. **切分** —— `uv run python scripts/build_corpus.py`
+   结构感知切分（代码按函数与结构体边界、文档按标题层级），换算行号后写 `data/corpus/chunks.jsonl`。
+3. **建索引** —— `uv run python scripts/index_corpus.py`
+   按稳定 id 幂等写入 Chroma，产物在 `data/chroma`。
+   常用开关：`--rebuild` 删库重建、`--fake` 跳过模型下载只验链路、`--smoke "问题"` 建完立刻检索一条。
+
+仓库自带一份示例语料（`data/corpus/raw/` 下的 `demo_echo.*` / `demo_notes.md` / `demo_adr.md`，
+共 **13 块**），克隆后直接跑第 2、3 步即可验证链路：
 
 ```bash
-uv run python scripts/build_corpus.py    # 语料 -> 块（带 source 与行区间）
-uv run python scripts/index_corpus.py    # 块 -> 向量库（按稳定 id 幂等写入）
+uv run python scripts/build_corpus.py
+uv run python scripts/index_corpus.py --smoke "为什么要用 eventfd 唤醒"
 ```
 
-实测：7 个文件 / 2237 行 → **139 块**（平均 495 字），入库 18.2 秒、索引 2.6 MB。
+完整语料实测：7 个文件 / 2237 行 → **139 块**（平均 495 字），入库 18.2 秒、索引 2.6 MB。
 embedding 模型 91 MB，重排模型 1.1 GB，均缓存在 `data/fastembed`（`data/` 已被忽略，不入库）。
+
+> 示例语料只用于跑通链路；`eval/baseline.json` 的数字来自完整语料。
+> 用示例语料重跑评测不会复现那些数字 —— 定位题引用的文件不在示例里。
+>
+> `.gitignore` 只放行 `data/corpus/raw/` 下的 `demo_*` 与说明文件，
+> 使用者自己的语料仍留在本地：语料属于可重建的派生物，评测基线不随仓库分发。
 
 > 两个模型都通过 `huggingface_hub` 下载。`scripts/index_corpus.py` 内置镜像配置；
 > 运行期加载重排模型前，同样需要设置 `HF_ENDPOINT` 与 `NO_PROXY`，

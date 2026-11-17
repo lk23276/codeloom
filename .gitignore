@@ -41,7 +41,18 @@ htmlcov/
 *.db-wal
 *.db-shm
 *.sqlite3
-data/
+
+# data/ 整体不入库，唯一例外是随仓库发布的示例语料：
+#   克隆后无需自备材料即可跑通「切分 -> 建索引」
+# ★ 只放行 raw/ 下的 demo_* 与说明文件 —— 使用者自己的语料仍留在本地，
+#   与「语料是派生物」的取舍保持一致（基线是在完整语料上测的，不随仓库分发）
+data/*
+!data/corpus/
+data/corpus/*
+!data/corpus/raw/
+data/corpus/raw/*
+!data/corpus/raw/demo_*
+!data/corpus/raw/_README.txt
 
 # ── RAG 向量库持久化（可重建，不入库）──
 chroma/
