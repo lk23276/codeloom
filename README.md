@@ -1,375 +1,269 @@
 # CodeLoom（码络）· 可溯源的多 Agent 工程知识助手
 
-> **一句话**：面向**自有工程语料**（源码 + 项目文档）的多 Agent 问答服务。
-> 卖点不是「用了 LangChain」，而是**用服务器思维把 LLM 服务做稳**：分层边界、流式、限流、
-> trace-id 日志、双探针、一条命令起容器 —— 以及答案可以溯源到文件行号。
-
-当前状态：**v0.5 完成**（检索增强已可用）。多 Agent 在 v1.0。
+> 面向**自有工程语料**（源码 + 项目文档）的问答服务：答案能落到 `server2.cpp:609-625` 这样的文件行号。
+> 重点是**用了服务端工程的方法把它做稳**：分层边界、流式与背压、限流、
+> 结构化日志、双探针、记忆与暂停、可观测与回归门禁。
 
 | 版本 | 范围 | 状态 |
 |---|---|---|
-| v0.1 | `/chat` + `/chat/stream`(SSE) + SQLite 多轮 + 1 个本地工具 + 限流 + 结构化日志 + Docker | ✅ |
-| v0.5 | 语料加载 → 切分 → bge Embedding → Chroma → 重排 → 文件行号引用 → 评测基线 | ✅ |
-| v1.0 | LangGraph Supervisor + checkpointer + 自研 MCP Server + Langfuse trace + step limit | 计划中 |
+| v0.1 | `/chat` + SSE 流式 + SQLite 多轮 + 1 个本地工具 + 限流 + 日志 + Docker | ✅ |
+| v0.5 | 切分 → bge Embedding → Chroma → 重排 → 行号引用 → 评测基线 | ✅ |
+| v1.0 | 状态图 Agent + checkpointer 记忆 + HITL + MCP + trace + 回归门禁 + 演示台 + 部署脚本 | ✅ |
 
+## 与 lkserver2 的关系
 
----
-
-## 与 server2 的关系
-
-```
-server2  = 自己造的 C++ 高并发传输层  -> 懂 epoll / Reactor / 背压 / 优雅关闭 / 压测
-CodeLoom = 在这套底层认知上盖的 Python + LLM 应用层
-```
-
-| server2 的能力 | 在 CodeLoom 的落点 |
-|---|---|
-| 主从 Reactor / epoll ET | `asyncio` 事件循环（uvicorn） |
-| EPOLLOUT 写半包 / 抽干 | SSE 生产快于消费时的背压与慢客户端 |
-| 信号量 / 锁 | 滑动窗口限流 + `asyncio.to_thread` 串行化 SQLite |
-| signalfd 优雅关闭 | `lifespan` 关闭时释放数据库连接 |
-| MSG_NOSIGNAL / 对端断开 | 客户端断流 → `finally: await stream.aclose()` 关上游（省钱） |
-| 压测方法论 | 后续压测表复用同一套（wrk2 / pidstat / fd） |
-
----
+lkserver2 是 C++ 写的 Reactor 服务器：**在回调里绝不做阻塞 IO**、按连接管理生命周期。
+CodeLoom 把同一条纪律搬到 Python：`async def` 里不碰同步 IO、请求上下文用 `ContextVar` 贯穿、
+探针区分「活着」与「能接流量」。一个是底座，一个是长在上面的应用。
 
 ## 架构
 
 ```
-                  +---------------------------------------------+
-  curl / 前端 ---> | uvicorn (workers=1)                         |
-                  |   middleware: request_id + 结构化 access 日志 |
-                  +----------------------+----------------------+
-                                         v
-                  +---------------------------------------------+
-                  | router/   /chat   /chat/stream              |
-                  |           /sessions*   /healthz   /readyz   |
-                  +----------------------+----------------------+
-                                         v
-                  +---------------------------------------------+
-                  | service/  ChatService                       |
-                  |   会话编排 / FC 循环(<=3 步) / 异常翻译        |
-                  +---------+----------------------+------------+
-                            v                      v
-                  +-------------------+   +----------------------+
-                  | client/llm.py     |   | tools/registry.py    |
-                  | 唯一 import openai |   | ast 白名单计算器      |
-                  +---------+---------+   +----------------------+
-                            v
-                      DeepSeek API
-
-                  db/store.py   SQLite(WAL)：会话 + 消息
+router/    接参数、调 service、包响应体      ← 只做协议转换
+service/   编排流程，不认识 HTTP / SDK      ← 可被单测直接调用
+client/    唯一 import openai 的地方
+rag/       唯一 import chromadb 的地方
+agent/     唯一 import langgraph 的地方
+core / schema / db / obs / tools           ← 配置、契约、存储、观测、工具
 ```
 
-分层规则（被破坏时不会报错，只会逐步失效）：
-
-- `service/` 不许 `import fastapi`、不许 `import openai`、不许写 SQL
-- `client/` 是唯一 import `openai` 的地方
-- `tools/` 不认识 HTTP，也不知道 SDK
-- `rag/` 是唯一接触向量库与重排模型的地方，`service/` 只认识它的 Protocol
-- 校验命令：`grep -rnE "^\s*(from|import)\s+(fastapi|openai|chromadb|fastembed)" src/app/service/` 应无输出
-  （只匹配真实 import 行；docstring 里提到的名字不算）
-
-> 检索链路（v0.5）在对话链路之外单独成一条：
-> `router/rag.py` → `service/rag_service.py` → `rag/`（Chroma 检索 + cross-encoder 重排）。
-> 它与对话链路共用 `client/llm.py`，不改变 `/chat` 的既有行为。
-
----
-
-## 核心特性
-
-- **流式问答**：`/chat/stream` 按 `meta -> delta... -> done` 推送；`X-Accel-Buffering: no` 防中间层缓冲
-- **多轮记忆**：SQLite 落库，`session_id` 续聊；未知 id 返回 404，**不静默新建**
-- **Function Calling**：本地计算器（`ast` 白名单，**禁用 eval**），最多 3 步，工具结果全部转成文本
-- **限流**：滑动窗口（无边界突刺），按客户端 IP 分桶 + LRU 上限，超限 429 + `Retry-After`
-- **结构化日志**：一行一个 JSON，`request_id` 用 `ContextVar` 贯穿中间件/业务/工具层
-- **统一错误体**：`{code, msg, data, request_id}`，业务码与 HTTP 状态同源
-- **双探针**：`/healthz` 不碰依赖（存活），`/readyz` 查 DB（就绪）
-- **容器化**：多阶段构建、非 root、`/data` 卷、镜像内 HEALTHCHECK
-- **可溯源问答**（v0.5）：`/rag/ask` 检索自有语料，回答带 `文件:行号` 引用；依据不足时直接拒答，不产生模型调用
-
----
-
-## 检索增强（v0.5）
-
-> 本节说明实现与指标。需要先跑通，见「快速开始」；只查接口字段，见「接口」。
-
-把自有工程语料变成可检索、可引用的知识库。链路是三段式，顺序不可交换：
-
-```
-139 个块 ──向量粗召回 top-20──> 候选 ──cross-encoder 精排 top-5──> 上下文
-                                                        │
-                                      最高分 < 阈值 ────┴──> 直接拒答（不调用模型）
-                                                        └──> 注入 [n] 文件:行号 ──> LLM ──> 回答 + 引用
-```
-
-粗召回负责不漏，精排负责排准。**精排只能重排候选集里已有的块** —— 候选里没有正确答案时，
-再准的重排也无法补救，所以 `Hit@recall` 是整条链路的天花板。
-
-### 准备语料：三步
-
-1. **放文件** —— 把源码与文档放进 `data/corpus/raw/`
-   支持 `.cpp` `.cc` `.c` `.h` `.hpp` `.md` `.markdown`，子目录递归扫描。
-   文件名不要用中文或空格：它会进引用，出现在回答里。
-2. **切分** —— `uv run python scripts/build_corpus.py`
-   结构感知切分（代码按函数与结构体边界、文档按标题层级），换算行号后写 `data/corpus/chunks.jsonl`。
-3. **建索引** —— `uv run python scripts/index_corpus.py`
-   按稳定 id 幂等写入 Chroma，产物在 `data/chroma`。
-   常用开关：`--rebuild` 删库重建、`--fake` 跳过模型下载只验链路、`--smoke "问题"` 建完立刻检索一条。
-
-仓库自带一份示例语料（`data/corpus/raw/` 下的 `demo_echo.*` / `demo_notes.md` / `demo_adr.md`，
-共 **13 块**），克隆后直接跑第 2、3 步即可验证链路：
+依赖规则可被命令校验，不是口头约定：
 
 ```bash
-uv run python scripts/build_corpus.py
-uv run python scripts/index_corpus.py --smoke "为什么要用 eventfd 唤醒"
+git grep -nE "^\s*(from|import)\s+(fastapi|openai|chromadb)" src/app/service/   # 应无输出
+git grep -ln "^import openai\|^from openai" src/app/                            # 只有 client/llm.py
 ```
 
-完整语料实测：7 个文件 / 2237 行 → **139 块**（平均 495 字），入库 18.2 秒、索引 2.6 MB。
-embedding 模型 91 MB，重排模型 1.1 GB，均缓存在 `data/fastembed`（`data/` 已被忽略，不入库）。
+唯一例外是 `agent_service.py` 为类型标注 import 了 `CompiledStateGraph`（不是运行时依赖）。
 
-> 示例语料只用于跑通链路；`eval/baseline.json` 的数字来自完整语料。
-> 用示例语料重跑评测不会复现那些数字 —— 定位题引用的文件不在示例里。
->
-> `.gitignore` 只放行 `data/corpus/raw/` 下的 `demo_*` 与说明文件，
-> 使用者自己的语料仍留在本地：语料属于可重建的派生物，评测基线不随仓库分发。
+三个入口互不替代，**也不共享历史**：
 
-> 两个模型都通过 `huggingface_hub` 下载。`scripts/index_corpus.py` 内置镜像配置；
-> 运行期加载重排模型前，同样需要设置 `HF_ENDPOINT` 与 `NO_PROXY`，
-> 否则首次请求会卡在下载。建议在部署阶段预下载。
-
-### 调用
-
-```bash
-curl -s -X POST localhost:8000/rag/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question":"eventfd 是怎么用来唤醒事件循环的"}'
-```
-
-响应节选（真实调用）：
-
-```json
-{
-  "code": "OK",
-  "data": {
-    "refused": false,
-    "answer": "在 `EventLoop` 构造时创建 `eventfd`，包装成 Channel 注册到本反应堆 [2]……（正文节选）",
-    "citations": [
-      {"index": 2, "source": "server2.cpp", "line_start": 359, "line_end": 368, "score": 4.0964},
-      {"index": 3, "source": "server2.cpp", "line_start": 345, "line_end": 362, "score": 3.6527}
-    ],
-    "invalid_citations": 0,
-    "top_score": 5.5801,
-    "recalled": 20,
-    "reranked": 5,
-    "latency_ms": 9876
-  },
-  "request_id": "……"
-}
-```
-
-三个字段需要单独说明：
-
-- `citations` 的位置由服务端从块 metadata 映射得到。模型只输出 `[n]`，**不写文件名或行号** ——
-  它没有原文的偏移信息，写出来的路径无法校验。
-- `invalid_citations` 统计模型引用了不存在的编号。非零表示提示词或块数异常，不会让请求失败。
-- `refused=true` 时 HTTP 仍为 200，且 `usage` 全为 0：拒答发生在调用模型之前。
-
-`max_tokens` 默认 800。上限只限制长度、不产生额外调用；判据是 `completion_tokens` 正好等于上限，
-此时正文通常停在半句或代码块中间（300 与 500 都实测过截断）。
-
-### 评测基线
-
-```bash
-uv run python -m eval.run                 # 不调用模型，同输入结果一致
-uv run python -m eval.run --with-llm      # 追加引用精度（8 次真实调用）
-```
-
-基线文件：`eval/baseline.json` 是可复现基线（不含生成指标），回归对比以它为准；
-`eval/baseline_with_llm.json` 是含引用精度的一次快照，受采样影响，只作参考。
-
-| 指标 | 值 | 口径 |
+| 入口 | 职责 | 记忆 |
 |---|---|---|
-| Hit@recall | **100%** | 金标块是否落在粗召回 top-20 内（链路天花板） |
-| Hit@3 | **87.5%**（7/8） | 精排后 top-3 是否含金标块 |
-| MRR@3 | **0.729** | 首个命中排名倒数的均值 |
-| 拒答正确率 | **100%**（7/7） | 无关题被拒的比例 |
-| 误拒率 | **0%**（0/8） | 相关题被误拒的比例，必须与上一行同看 |
-| 引用精度 | **82.6%**（19/23） | 引用指向 `gold_sources` 的比例（来源级口径） |
+| `/chat` | 轻问答，可调本地工具 | SQLite `session_id` |
+| `/rag/ask` | 文档问答，带引用与拒答 | 无（无状态） |
+| `/agent` | 多步工具，可暂停审批 | checkpointer `thread_id` |
 
-`Hit@recall = 100%` 说明召回不是瓶颈；`Hit@3` 与 `MRR@3` 反映的是排序质量。
+## 核心能力与判据
 
-### 一个负面结果：重排不是净收益
+| 能力 | 入口 / 产物 | 判据 |
+|---|---|---|
+| 流式问答 | `/chat/stream`（`meta → delta… → done`） | `curl -N` 可见逐 token；三响应头齐全 |
+| 多轮记忆 | `session_id` | 未知 id 返回 404，**不静默新建** |
+| Function Calling | `ast` 白名单计算器，最多 3 步 | `2**40` 精确输出 `1099511627776` |
+| 限流 | 滑动窗口 + 按 IP 分桶 + LRU | 120/min 要打满 **121 次**才 429 |
+| 可溯源问答 | `/rag/ask` 引用映射 | 引用来自服务端，不是模型写的 |
+| 状态图 Agent | `/agent`、`/agent/{id}/messages` | 同一 thread 第二轮记得第一轮 |
+| HITL | `hitl=true` → 暂停 → `approve` | 暂停时 `tool_calls` 为空，工具未执行 |
+| MCP | stdio，3 工具 + 1 资源 | `mcp_smoke.py` 6 项断言；越界路径被拒 |
+| 可观测 | `data/traces.jsonl`、Langfuse（可选） | 三层 span，`trace_id == X-Request-ID` |
+| 回归门禁 | `eval/compare.py` | 退出码 0/1/2（2 = 口径不符） |
+| 部署 | `scripts/setup.*`、`run.*` | 新机器一条命令起；重复执行跳过已完成步骤 |
+| 容器 | `Dockerfile` | 镜像内一条 `exec` 建 13 块；复用卷不重下模型 |
 
-引入 cross-encoder 后逐题对比（同一份金标、同一个阈值；排名为 1 起始，超过 5 记作「出前 5」）：
+实测数字：
 
-| 用例 | 纯向量排名（top-20 内） | 重排后排名 | 变化 |
-|---|---:|---:|---|
-| L03 边沿触发 | 9 | 1 | 修好 |
-| L01 半包续发 | 3 | 出前 5 | 变差 |
-| L04 零拷贝 | 1 | 3 | 变差 |
-| L08 定量结论 | 1 | 2 | 变差 |
-
-结果是 `Hit@3` 不变（失败用例从 L03 换成 L01），而 **MRR 由 0.792 降到 0.729**。
-一个可解释的原因是：重排模型偏好字面重合，「续发」与 `handleWrite` 之间缺少直接对应；
-而向量检索本就把该块排在前三。该解释尚未验证 —— 4 个样本不足以支撑因果结论。
-
-决策：**不在这 8 条题上调整参数或更换模型**。小样本下调阈值、改权重、换重排模型，
-得到的是对样本的拟合，换一批题即失效。下一步是把定位题扩充到 30 条以上再判断净收益；
-候选方案是 `bge-reranker-v2-m3-int8`（0.57 GB，多语，体积为当前的一半）。
-
-### 拒答阈值
-
-重排输出是**原始 logits**（未过 sigmoid），可以为负，也可以远大于 1，因此阈值必须在标注集上标定：
-
-```bash
-uv run python scripts/calibrate_rerank.py
-```
-
-实测（8 条相关题 + 7 条无关题，其中 3 条是同领域但语料未覆盖的难负例）：
-
-| 类别 | 最高分范围 |
+| 项 | 结果 |
 |---|---|
-| 相关 | 1.06 ～ 6.62 |
-| 无关（易：行情 / 烹饪 / 宠物 / 影视） | −8.89 ～ −4.13 |
-| 无关（难：Kafka / Redis / MySQL） | −3.52 ～ −2.59 |
-
-可用区间为 **(−2.59, 1.06)**，默认值 0.2 落在区间内，误拒 0/8、挡掉 7/7。
-阈值上调到 2.0 开始误拒（1/8），3.0 时误拒 3/8 —— 不应为了「拒得更干净」而上调，
-拒答正确率必须与误拒率一起看。
-
----
+| 测试 | **240 passed**，覆盖 **91%** |
+| 检索 | Hit@recall 100%、Hit@3 87.5%、MRR@3 0.729（8 条定位题，`k=3`） |
+| 工具 / 记忆 | tool 5/5、memory 3/3 |
+| 红队 | 服务层拒答 9/10，**可疑输出 0** |
+| 门禁 | 正常 0；MRR 降 0.10 → 1；`k` 不符 → 2 |
+| 压测 | probe P50 14ms；chat P50 1304ms（自研开销占端到端 1~2%） |
 
 ## 快速开始
 
 ```bash
-uv sync                                  # 安装依赖（Python >= 3.13）
-cp .env.example .env                     # 填 APP_LLM_API_KEY
-uv run uvicorn app.main:app --reload --port 8000 --no-access-log
+# Linux / macOS / Git Bash
+scripts/setup.sh            # 装依赖 → 准备 .env → 建索引 → 自检
+scripts/run.sh              # 启动，打印四个入口
+scripts/run.sh --verify     # 启动并冒烟（含 4 次模型调用）
 ```
 
-不用 key 也能起：探针与会话接口正常，`/chat*` 返回 502；
-`/rag/ask` 只有在需要生成时才返回 502，拒答路径（`refused=true`）不依赖模型。
+Windows 用 `scripts\setup.ps1` / `run.ps1`，参数相同。首次会提示填 `APP_LLM_API_KEY`
+（脚本只判断是否为空，不读取、不打印），填完再跑一次即可。
 
-```bash
-# 非流式
-curl -s -X POST localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"用一句话介绍 epoll"}'
-
-# 流式（★ -N 不能省，否则 curl 会缓冲，看起来像"没有流"）
-curl -N -X POST localhost:8000/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message":"你好"}'
-
-# 探针
-curl -s localhost:8000/healthz ; echo
-curl -s localhost:8000/readyz  ; echo
-```
-
-> 默认 `max_tokens=200` 是**成本闸门**：长回答会被截断（正文停在半句或半个代码块中间，
-> 日志里 `completion_tokens` 正好等于 200）。要完整答案就传 `"max_tokens": 600`。
-
-### Windows PowerShell 验收
-
-1. `curl` 是 `Invoke-WebRequest` 的别名，不支持 `-N` → 一律写 **`curl.exe`**
-2. `Invoke-RestMethod` 在响应头没有 charset 时按 **ISO-8859-1** 解码，中文会变成 `æ¯ Linux`
-   （JSON 按 RFC 8259 恒为 UTF-8，是 PS 5.1 的问题；服务端**不该**为此加非标准的 `charset`）
-3. `-Body '中文字符串'` 会把非 ASCII 变成 `?` —— 实测入库是 `??A:?????`，
-   模型只看到 `epoll` 这个 ASCII 词，回答看似合理，实际已丢掉原问题
-
-正确姿势：请求体写 **UTF-8 无 BOM 文件**，响应落文件后按 UTF-8 读。
-
-```powershell
-[IO.File]::WriteAllText("$PWD\req.json", '{"message":"用一句话介绍 epoll","max_tokens":600}',
-                        [Text.UTF8Encoding]::new($false))
-
-curl.exe -s -X POST http://127.0.0.1:8000/chat -H "Content-Type: application/json" `
-  --data-binary "@req.json" -o resp.json
-(Get-Content resp.json -Encoding UTF8 -Raw | ConvertFrom-Json).data.reply
-
-# 流式：先切控制台到 UTF-8，否则中文 token 在 cmd 里是乱码
-chcp 65001 > $null
-curl.exe -N -X POST http://127.0.0.1:8000/chat/stream -H "Content-Type: application/json" `
-  --data-binary "@req.json"
-```
-
-> 想一条命令看全流程（探针 / 非流式 / SSE / trace id），用 Git Bash 或 WSL 跑
-> `bash scripts/smoke.sh` —— 它全部由 bash 实现，可避开上述三处问题。
-
-### 浏览器演示页
-
-两个页面都由同一个 FastAPI 提供，同源、单文件、零构建：
-
-| 页面 | 地址 | 演示什么 |
+| 命令 | 作用 | 幂等行为 |
 |---|---|---|
-| 流式问答 | `http://127.0.0.1:8000/demo/` | 逐字渲染，显示首字耗时 / 总耗时 / delta 帧数 |
-| 知识库问答 | `http://127.0.0.1:8000/demo/rag.html` | 带行号的引用、点编号跳转、拒答状态与重排分数 |
+| `setup` | 磁盘/uv 检查 → `uv sync` → `.env` → key 校验 → 建索引 → 自检 | `.env` 不覆盖；索引健康则跳过 |
+| `run` | 选空闲端口 → 起服务 → 等就绪 → 打印入口 | 端口占用时自动往后找（显式 `--port` 则报错） |
+| `verify` | 6 项冒烟 | 只读 |
+| `doctor` | 环境体检 | 只读 |
 
-- 输入一句话 → **逐字渲染**，页面上直接显示「首字耗时 / 总耗时 / delta 帧数」
-- 页面和接口**同一个 origin**（`GET /demo/` 由同一个 FastAPI 提供），所以
-  `fetch('/chat/stream')` 不会触发 CORS —— 这是不需要 Vite/React 的原因
-- 单文件、零依赖：`src/app/static/index.html` 与 `src/app/static/rag.html`；
-  `html=True` 让 `/demo/` 直接返回 `index.html`
+退出码：**0** 成功 / **1** 环境问题（uv、依赖、端口、索引）/ **2** 配置问题（key 为空）。
 
-![CodeLoom 流式演示](docs/demo.gif)
-
-### 一次真实调用
+不想用脚本时的手动三步：
 
 ```bash
-$ curl -s -X POST localhost:8000/chat -H "Content-Type: application/json" \
-       -d '{"message":"用一句话介绍 epoll"}' | jq '.data'
-{
-  "reply": "epoll 是 Linux 提供的一种 I/O 多路复用机制：内核维护一个事件就绪列表……",
-  "session_id": "fb259cb188714172953e5cba6b735c5b",
-  "usage": {"prompt_tokens": 444, "completion_tokens": 114, "total_tokens": 558}
-}
+uv sync
+uv run python scripts/build_corpus.py    # 示例语料 → 13 块
+uv run python scripts/index_corpus.py    # 建索引（首次下 90 MB 向量模型）
+uv run uvicorn app.main:app --port 8000 --workers 1
 ```
 
-```bash
-$ curl -N -X POST localhost:8000/chat/stream -H "Content-Type: application/json" \
-       -d '{"message":"你好"}'
+打开 `http://127.0.0.1:8000/demo/v1.html`（总览台），或 `/demo/`（流式）、`/demo/rag.html`（知识库）。
+
+一次真实调用的帧序列（中间省略）：
+
+```
 event: meta
-data: {"session_id": "4cd9cbfb44344d77a83c6d1dffee3721", "model": "deepseek-flash"}
+data: {"session_id":"...","model":"deepseek-flash"}
 
 event: delta
-data: 你好
-
-event: delta
-data: ！
-
-... （同一句共 179 个 delta 帧，此处省略）
+data: epoll
 
 event: done
 data: [DONE]
 id: end
 ```
 
-> 179 这个数字比任何注释都能证明「真流式」：上游按小块推，我们是收一块转一块。
-> 上方动图就是同一次请求的录屏：首字 597 ms、总耗时 1343 ms、77 个 delta 帧。
+> `--workers 1` 不能省：SQLite 锁、限流器、Agent 线程锁都是进程内的。
 
-### Docker
+## Docker
+
+镜像自带 `scripts/` 与示例语料，容器内可直接建索引，不需要挂宿主机目录。
 
 ```bash
-docker build -t codeloom:latest .
+docker build -t codeloom:1.0.0 .
 
-# ★ 用 -d --name 而不是 --rm：容器退出时要能看到日志和退出码
-# ★ --restart unless-stopped：WSL 空闲会关发行版、dockerd 跟着停，
-#   没有重启策略的话容器就一直是 Exited，得手动 docker start
-docker run -d --name codeloom --restart unless-stopped \
-  -p 8000:8000 \
-  -v codeloom-data:/data \
-  -e APP_LLM_API_KEY=sk-... \
-  codeloom:latest
+docker volume create codeloom-data
+read -rsp "API key: " K; echo; docker run -d --name codeloom --restart unless-stopped -p 8000:8000 -v codeloom-data:/data -e APP_LLM_API_KEY="$K" -e HF_ENDPOINT=https://hf-mirror.com codeloom:1.0.0
+unset K
+
+docker exec codeloom python scripts/index_corpus.py        # 13 块
+docker exec codeloom python scripts/prefetch_models.py     # 预热两个模型（推荐）
 ```
 
-> 镜像里 `APP_DB_PATH=/data/sessions.db`；`/data` 必须挂卷，否则容器一删会话就没了。
->
-> 更稳的传 key 方式：`printf 'APP_LLM_API_KEY=%s\n' 'sk-...' > ~/.codeloom.env && chmod 600 ~/.codeloom.env`，
-> 然后 `--env-file ~/.codeloom.env`。★ 文件必须是 **LF** 换行（`printf` 天然是），
-> CRLF 会把 `\r` 带进值里，表现为 401。
+`/data` 是唯一需要挂卷的位置：
 
----
+| 文件 | 来源 | 删了会怎样 |
+|---|---|---|
+| `sessions.db` | `/chat` 会话 | 多轮历史丢失 |
+| `agent_memory.db` | checkpointer | `/agent` 记忆丢失 |
+| `traces.jsonl` | 本地 trace | 只影响可观测 |
+| `chroma/` | 索引 | 重跑 `index_corpus.py` |
+| `fastembed/` | 两个模型（≈1.2 GB） | 下次重新下载 |
+
+重建镜像时卷不动，模型与索引全部复用。换成自己的语料：
+
+```bash
+docker run -d --name codeloom -p 8000:8000 -v codeloom-data:/data \
+  -v /path/to/corpus:/corpus:ro -e APP_LLM_API_KEY=... -e HF_ENDPOINT=https://hf-mirror.com codeloom:1.0.0
+docker exec codeloom python scripts/build_corpus.py --root /corpus --out /data/chunks.jsonl
+docker exec codeloom python scripts/index_corpus.py --chunks /data/chunks.jsonl --rebuild
+```
+
+容器排错（均为实测踩到）：
+
+| 现象 | 根因 |
+|---|---|
+| `can't open file '/app/scripts/...'` 但 `COPY scripts` 成功 | 空目录也能 COPY 成功；镜像里已加 `test -s` 守卫 |
+| `Permission denied (os error 13)` 下载模型失败 | 命名卷挂到不存在的路径会以 root 创建；已预建并 chown |
+| 索引能建，首个 `/rag/ask` 卡 70 秒后 502 | `HF_ENDPOINT` 只给了脚本，服务进程没给 |
+| 粘多行命令时 key 变成下一行命令 | `read -rsp` 会消费后续输入，须与 `run` 同一行 |
+
+> 用 `--env-file .env` 时，`.env` 里的 `APP_DB_PATH` 等四项是本地相对路径，会覆盖镜像内置的 `/data/...`；
+> 要么只传 key，要么把这四项显式 `-e` 覆盖。文件必须是 LF，CRLF 会把 `\r` 带进值里（表现为 401）。
+
+## 检索增强
+
+链路：139 块 → 向量召回 top-20 → cross-encoder 精排 top-5 → 阈值判定 → 生成带 `[n]` → 服务端映射行号。
+
+```bash
+curl -s -X POST localhost:8000/rag/ask -H "Content-Type: application/json" \
+  -d '{"question":"为什么要用 eventfd 唤醒"}' | head -c 200
+```
+
+```json
+{"question":"为什么要用 eventfd 唤醒","refused":false,"answer":"…[1]…",
+ "citations":[{"index":1,"source":"demo_echo.cpp","line_start":41,"line_end":58}],
+ "recalled":13,"reranked":5,"top_score":5.52}
+```
+
+| 指标 | 值 | 说明 |
+|---|---|---|
+| Hit@recall | **100%** | 答案是否落在粗召回 top-20（链路天花板） |
+| Hit@3 | **87.5%** | 8 条定位题中 7 条进前三 |
+| MRR@3 | **0.729** | 纯向量基线 0.792 |
+| 拒答 | 7/7 无关题被挡，0/8 误拒 | 阈值 0.2，标定区间 (−2.59, 1.06) |
+
+**重排不是净收益**：它把一条从第 9 提到第 1，也把另外三条挤出原位，MRR 由 0.792 降到 0.729。
+8 条题不足以调参，结论是「留着、可替换、不据此定阈值」。
+
+两条容易误读的语义：拒答返回 **200**（正常业务结果，`usage` 全 0 证明没调模型）；
+`citations` 的位置来自块 metadata，模型只写编号——它没有原文偏移，写出的路径没有依据。
+
+## Agent（状态图）
+
+```
+START → agent ──(有 tool_calls)──→ tools ──→ agent
+            └──(无 tool_calls)──→ END
+```
+
+```bash
+# 第一轮：拿 thread_id
+curl -s -X POST localhost:8000/agent -H "Content-Type: application/json" \
+  -d '{"message":"12*7 等于几"}' | head -c 160
+
+# 暂停：hitl=true → 工具不执行
+curl -s -X POST localhost:8000/agent -H "Content-Type: application/json" \
+  -d '{"message":"3*5 等于几","hitl":true}'
+
+# 恢复：approve（与 message 互斥）
+curl -s -X POST localhost:8000/agent -H "Content-Type: application/json" \
+  -d '{"thread_id":"<上一步的 id>","approve":true}'
+
+# 历史：读 checkpointer，不另存一份
+curl -s localhost:8000/agent/<thread_id>/messages
+```
+
+- 记忆 = **快照 + 分桶键**：每个超步写一份 state，按 `thread_id` 分桶；不传 `thread_id` 会直接报错，没有隐式默认桶。
+- 同 thread 按 `asyncio.Lock` 串行：并发写同一个桶会互相覆盖（实测期望 8 条得 6 条，两路都返回 200）。
+- `approve` 先校验：不存在 → 404，「存在但无待审批」→ 400。混在一起会让「id 拼错」和「重复审批」无法区分。
+- `/agent` 无流式（工具轮次里没有稳定 token 流），也无跨实例记忆（锁在进程内）。
+
+## MCP Server
+
+| 原语 | 名字 | 用途 |
+|---|---|---|
+| Tool | `search_code` / `read_file` / `list_files` | 模型主动调用，全部只读 |
+| Resource | `corpus://{name}` | 客户端按 URI 取原文 |
+
+两条实现约束：**stdout 是 JSON-RPC 帧通道**，日志必须走 stderr（`print` 会污染帧通道，且错误出现在若干帧之后）；
+**路径白名单两步且不能反序**——先 `resolve()` 再 `is_relative_to(root)`，字符串查 `..` 挡不住软链接与 `%2e%2e%2f`。
+
+自测不依赖 GUI 客户端：
+
+```bash
+uv run python scripts/mcp_smoke.py     # 握手 → list_tools → call_tool → list_resource_templates
+```
+
+配置在仓库根的 `.mcp.json`，从项目根启动即可。
+
+## 可观测与回归门禁
+
+trace-id 是「一根线」，span 树多出层级与耗时归因。一次 `/rag/ask` 的真实记录：
+
+```
+retrieve   24.8ms   k=20 hits=13
+rerank   2000.0ms   candidates=13 scored=13
+llm      2357.4ms   prompt=1491 completion=383
+```
+
+三者 `trace_id` 相同，且与响应头 `X-Request-ID` 一致——排查时不必在两个系统之间二次搜索。
+本地 JSONL 永远可用；Langfuse 没配 `LANGFUSE_*` 时返回 `None`，不阻断启动。
+
+门禁的判据是**退出码**，不是输出好看：
+
+| 码 | 含义 | 典型原因 |
+|---:|---|---|
+| 0 | 通过 | 全部指标在阈值内 |
+| 1 | 退化 | MRR 下降超过阈值 |
+| 2 | 口径不符 | `k` / `with_llm` / 语料块数跟基线不同 |
+
+2 单独给：它不是模型问题，归到 1 会把人带去错方向。阈值有两套口径——比率按百分点、计数按绝对条数；
+8 条题里 1 条翻转就是 12.5pp，小样本下不要用百分比表达变化。
 
 ## 接口
 
@@ -378,186 +272,110 @@ docker run -d --name codeloom --restart unless-stopped \
 | 1 | POST | `/chat` | 一次性问答 | ✅ |
 | 2 | POST | `/chat/stream` | SSE 流式问答 | ✅ |
 | 3 | GET | `/sessions` | 会话列表 | ❌ |
-| 4 | GET | `/sessions/{id}/messages` | 会话全部消息 | ❌ |
-| 5 | DELETE | `/sessions/{id}` | 删除会话（消息级联） | ❌ |
-| 6 | GET | `/healthz` | 存活探针（不碰依赖） | ❌ |
-| 7 | GET | `/readyz` | 就绪探针（查 DB） | ❌ |
-| 8 | POST | `/rag/ask` | 基于本地语料回答，带引用与拒答 | ✅ |
+| 4 | GET | `/sessions/{id}/messages` | 会话消息 | ❌ |
+| 5 | DELETE | `/sessions/{id}` | 删除会话（级联消息） | ❌ |
+| 6 | GET | `/healthz` | 存活（不碰依赖） | ❌ |
+| 7 | GET | `/readyz` | 就绪（查 DB） | ❌ |
+| 8 | POST | `/rag/ask` | 语料问答 + 引用 + 拒答 | ✅ |
+| 9 | POST | `/agent` | 多步工具 + 记忆 + 审批 | ✅ |
+| 10 | GET | `/agent/{thread_id}/messages` | thread 历史 | ❌ |
 
-> 另有 `GET /demo/`：同源静态演示页（单文件 HTML，不计入 API 端点，也不出现在 `/docs` 的 OpenAPI 里）。
+另有 `GET /demo/`：同源静态演示页，不计入 API 端点，也不出现在 `/docs` 的 OpenAPI 里。
 
-`/rag/ask` 的字段、引用映射规则、拒答语义与评测口径见「检索增强（v0.5）」一节。
-其中两条容易误读：拒答返回 200（它是正常结果，不是请求错误）；
-`citations` 的位置来自块 metadata，不是模型输出。
+统一响应体永远四键：`{code, msg, data, request_id}`。SSE 帧：
 
-请求体（`/chat` 与 `/chat/stream` 相同）：
-
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `message` | string | 1–2000 | 用户这一轮说的话 |
-| `session_id` | string \| null | 1–64 | 不传新建；传了续聊；**不存在 → 404** |
-| `history_limit` | int | 1–200，默认 20 | 带多少条历史（越少越省钱） |
-| `max_tokens` | int | 1–1000，默认 200 | 输出上限 |
-
-成功响应统一为 `{code, msg, data, request_id}`；错误码：
-
-| code | HTTP | 场景 |
+| 帧 | data | 说明 |
 |---|---|---|
-| `VALIDATION_ERROR` | 422 | 请求体格式不对 |
-| `NOT_FOUND` | 404 | 会话不存在 |
-| `RATE_LIMITED` | 429 | 超限，带 `Retry-After` |
-| `UPSTREAM_ERROR` | 502 | 模型服务不可用 |
-| `INTERNAL_ERROR` | 500 | 本项目自身缺陷（堆栈只进日志） |
-
-### SSE 事件
-
-```
-event: meta       data: {"session_id":"...","model":"deepseek-flash"}
-event: delta      data: 逐 token 正文（可能几十上百帧）
-: ping            注释帧，长时间无 token 时保活
-event: error      data: {"code":"UPSTREAM_ERROR","msg":"..."}   仅出错时
-event: done       data: [DONE]
-```
-
-`done` 一定在最后：客户端靠它停止读取 —— 靠「连接关闭」表示结束，分不清正常结束和断网。
-
----
+| `meta` | `{"session_id","model"}`（JSON） | 首帧，先于任何 delta |
+| `delta` | 纯文本增量 | 可能几十上百帧 |
+| `error` | `{"code","msg"}`（JSON） | 状态码已是 200，只能事件告知 |
+| `done` | `[DONE]`（`id: end`） | 明确结束；不能靠连接关闭表示结束 |
+| `: ping` | — | 注释帧，长时间无 token 时保活 |
 
 ## 配置
 
-全部来自环境变量（`.env` 不入库，`.env.example` 是唯一文档）。
-
-| 变量 | 默认值 | 说明 |
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| `APP_LLM_API_KEY` | 空 | 为空时服务可启动，但 `/chat*` 返回 502 |
-| `APP_LLM_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容端点 |
-| `APP_LLM_MODEL` | `deepseek-flash` | 用官方正名，不用旧别名 |
-| `APP_LLM_BACKEND` | `openai` | `openai` 手写适配层 / `langchain` LCEL 适配层，对外契约相同（见 [ADR-7](docs/adr/ADR-7-langchain-boundary.md)） |
-| `APP_LLM_THINKING` | `false` | 思考模式默认关（省 5~14 倍输出 token） |
-| `APP_TIMEOUT_S` | `30` | 单次调用超时 |
-| `APP_MAX_RETRIES` | `2` | 预留（v0.1 未接重试，见已知限制） |
-| `APP_DB_PATH` | `./data/sessions.db` | 容器内是 `/data/sessions.db` |
-| `APP_RAG_PERSIST_DIR` | `./data/chroma` | 向量库目录，由 `scripts/index_corpus.py` 重建 |
-| `APP_RAG_EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 512 维、约 90 MB，走 ONNX，不需要 PyTorch |
-| `APP_RAG_TOP_K` | `5` | 精排后进入上下文的块数 |
-| `APP_RAG_RECALL_K` | `20` | 粗召回条数，必须大于 `TOP_K` |
-| `APP_RAG_RERANK_MODEL` | `BAAI/bge-reranker-base` | cross-encoder，约 1.1 GB，首次使用下载 |
-| `APP_RAG_MIN_RERANK_SCORE` | `0.2` | 拒答阈值（原始 logits），需在标注集上标定 |
-| `APP_RATE_LIMIT` | `30` | 每窗口请求数 |
-| `APP_RATE_WINDOW_S` | `60` | 窗口秒数 |
-| `APP_LOG_LEVEL` | `INFO` | — |
-| `APP_LOG_FORMAT` | `json` | `json` 生产 / `text` 本地开发 |
+| `APP_LLM_API_KEY` | 空 | 为空时服务能起、`/chat` 返回 502 |
+| `APP_LLM_BASE_URL` / `APP_LLM_MODEL` | `api.deepseek.com` / `deepseek-flash` | OpenAI 兼容端点 |
+| `APP_LLM_THINKING` | `false` | 思考默认关（成本差 5~14 倍） |
+| `APP_LLM_BACKEND` | `openai` | 可切 `langchain`（第二实现，用于对比） |
+| `APP_DB_PATH` | `./data/sessions.db` | SQLite（WAL） |
+| `APP_AGENT_CHECKPOINT` | `sqlite` | `memory` 仅用于测试 |
+| `APP_AGENT_MEMORY_PATH` | `./data/agent_memory.db` | 图状态 |
+| `APP_RAG_PERSIST_DIR` / `APP_RAG_EMBED_MODEL` | `./data/chroma` / `bge-small-zh-v1.5` | 索引与向量模型 |
+| `APP_RAG_RECALL_K` / `APP_RAG_TOP_K` | 20 / 5 | 粗召回 / 进上下文的块数 |
+| `APP_RAG_MIN_RERANK_SCORE` | 0.2 | 低于此值拒答 |
+| `APP_RATE_LIMIT` / `APP_RATE_WINDOW_S` | 30 / 60 | 滑动窗口 |
+| `APP_TRACE_LOCAL` / `APP_TRACE_PATH` | `true` / `./data/traces.jsonl` | 本地 trace |
+| `APP_LANGFUSE_*` | 空 | 配了才启用 |
 
----
+`max_tokens` 默认 `/chat` 200、`/rag/ask` 800，上限 5000。**默认值是成本闸门，上限只是上限**。
+截断判据是 `completion_tokens == max_tokens`，不是「看起来短」。
 
 ## 设计决策
 
-| 决策 | 为什么 | 代价 |
-|---|---|---|
-| **SSE 而不是 WebSocket** | 单向推送足够；SSE 走普通 HTTP，代理/网关/鉴权链路不用改 | 不能客户端中途插话 |
-| **流式不落库** | 半句话入库会污染历史；`astream` 也拿不到 usage | 流式聊完历史只有 user 半边；成本统计缺流式 |
-| **未知 `session_id` → 404** | `INSERT OR IGNORE` 会把「拼错 id」伪装成 200 并新开会话 | 会话被清理后旧 id 不能自动续上 |
-| **`--workers 1`** | SQLite 的锁与限流器都是进程内的 | 只能单机纵向扩容 |
-| **滑动窗口限流** | 固定窗口在边界会放过 2 倍流量；本项目不想给突发额度 | 每 key 存 N 个时间戳 |
-| **不信任 `X-Forwarded-For`** | 该头可伪造，信它等于关掉限流 | 部署在代理后需额外配置可信代理 |
-| **JSON 日志 + ContextVar** | 采集端按字段查，不解析字符串；不污染函数签名 | 人工直接读不如文本友好（`APP_LOG_FORMAT=text` 兜底） |
-| **FC 最多 3 步** | 防止模型无限循环调用工具，使调用成本不可控 | 复杂任务直接给兜底文案 |
+| 决策 | 代价 |
+|---|---|
+| 手写 SDK 客户端为默认，LangChain 作第二实现 | 多维护一层适配；换来异常可控、切后端不影响业务 |
+| 三入口不共享历史（SQLite / checkpointer / 无状态） | 不能跨入口续聊；换来无双写分叉 |
+| SQLite + `--workers 1` | 不能水平扩容；换来零外部依赖 |
+| RAG 无状态，多轮需另做 query rewrite | 少了「追问」体验；换来评测可复现、请求可重放 |
+| 拒答用阈值（区间标定） | 有漏答风险；用误拒率盯住 |
+| 重排保留但不据此调参 | 多 1 GB 模型与约 2 秒；等样本足够再判断 |
 
----
+## 已知限制
 
-## 已知限制（真实边界）
+1. 单机：锁 / 限流 / SQLite 都是进程内，只能 `--workers 1`。
+2. 评测样本小（8 + 7 + 5 + 3），指标只支持看趋势，不支持「提升 2%」这类结论。
+3. `/rag/ask` 无记忆，多轮追问需要 query rewrite（未做）。
+4. `/agent` 无流式；MCP 只有 stdio、无鉴权。
+5. trace 是单机 JSONL，无轮转与保留策略。
+6. 语料需自备：仓库与镜像只带示例语料（13 块），基线来自另一套完整语料，重跑不复现。
+7. 重排模型 1.1 GB，首次使用需下载，国内先设 `HF_ENDPOINT`。
 
-1. **流式不落库**：用 `/chat/stream` 聊完，历史里只有 user；下一轮非流式会带上这条「孤儿 user」。流式也没有 usage，成本统计只覆盖非流式。
-2. **限流是进程内的**：`--workers N` 下额度变成 N 倍；扩容前要换 Redis。按 IP 计数，NAT 后的用户共享额度。
-3. **单写者 SQLite**：并发写会排队（`busy_timeout=5s`），适合单机小流量。
-4. **没有鉴权**：任何能访问端口的人都能调 `/chat` 与 `/rag/ask`；上公网前必须加 API Key / 网关门禁。
-5. **重试未接**：`APP_MAX_RETRIES` 只是配置占位，`OpenAICompatClient` 显式关掉了 SDK 重试但没接 tenacity。
-6. **工具只有一个**：计算器。多 Agent 与 MCP 在 v1.0。
-7. **压测是单机下限**：每组只有 10 个样本、客户端与服务端同机，P99 实际等于最大值；不代表集群容量（见上文「压测」一节）。
-8. **检索是单路的**：只有向量召回 + 单模型精排，没有 BM25 混合、query 改写、分块重切。
-9. **引用精度按来源文件判定**：同一个文件的不同块都算命中，因此 82.6% 这个数字偏乐观。
-10. **评测样本小**：8 条定位题 + 7 条无关题，只支持看趋势，不支持据此调参。
-11. **重排模型常驻 1.1 GB**：`--workers 1` 下每进程一份；横向扩容前要重新估算内存。
-12. **`/rag/ask` 无会话记忆**：每次独立检索，不带历史，也不落库。
-13. **拒答会随语料变化**：阈值是在当前语料与当前重排模型上标定的，换模型或大改语料后需重新标定。
-
----
-
-## 测试
+## 测试与压测
 
 ```bash
-uv run pytest -q                                   # 160 passed
-uv run pytest --cov --cov-report=term-missing      # TOTAL 92%
-uv run ruff check . && uv run ruff format --check .
+uv run pytest -q --cov          # 240 passed / 91%
+uv run ruff check .             # 分层与格式
+uv run python -m eval.run --k 3 --out eval/runs/v1.json
+uv run python -m eval.compare --current eval/runs/v1.json   # 0/1/2
 ```
 
-覆盖重点不是行数，而是**不会报错的错误**：
+| 层 | 覆盖什么 |
+|---|---|
+| 契约（`test_api` / `test_rag_ask` / `test_agent_api`） | 状态码、错误码、响应体四键 |
+| 服务（`test_chat_service` / `test_agent_service`） | 工具循环、记忆、HITL、并发串行 |
+| 组件（`test_tools_registry` / `test_llm_client` / `test_lc_client`） | AST 白名单、异常翻译、参数映射 |
+| RAG（`test_rag_splitter` / `test_rag_vectorstore` / `test_rag_corpus`） | 切分偏移、幂等写入、语料完整性 |
+| 设施（`test_ratelimit` / `test_sse` / `test_store` / `test_logging`） | 窗口边界、帧格式、WAL、脱敏 |
 
-- 五步顺序（先落库再调模型）、usage 逐轮累加、未知 id 不静默新建
-- SSE 帧顺序、404 不能变 200、真流式（门控替身，假流式会超时）
-- FC：`tool_call_id` 一一配对、步数上限、工具失败不打断循环
-- 限流：边界不放过 2 倍突发、`Retry-After` 精确、LRU 淘汰
-- 日志：一行一个 JSON、trace id 贯穿、500 也带 id
-- RAG：阈值拒答不产生模型调用、引用按精排顺序映射、越界编号只计数、
-  分数与候选数量不一致时立即失败（错位会静默答错文件）
-
-> 关键用例做过**故障注入**验证：把实现改坏（id 写死 / usage 不累加 / 步数 +1 / `except` 收窄 / 去掉截断 / `extra=forbid` 改 `ignore`），对应用例都会失败。
-
----
-
-## 压测
-
-环境：Windows 本机 / `uvicorn --workers 1` / 关环并发 / 限流关闭 / 日志 WARNING。
-完整口径、局限与复跑方式见 [`benchmark/report.md`](benchmark/report.md)。
-
-| 组 | 并发 | 请求 | RPS | P50 | P95 | P99 | 关键指标 |
-|---|---:|---:|---:|---:|---:|---:|---|
-| `probe` `/healthz` | 20 | 9297 | **928** | 14 ms | 66 ms | 104 ms | 纯本地，不碰依赖 |
-| `chat` `/chat` | 2 | 10 | 1.5 | **1304 ms** | 1569 ms | 1569 ms | token 4490 + 683 |
-| `stream` `/chat/stream` | 2 | 10 | 1.8 | 1091 ms | 1286 ms | 1286 ms | **TTFB P50 609 ms**，delta 均值 51 |
-
-三个结论：
-
-1. **我们的开销只占端到端 1~2%**：`/healthz` P50 14 ms vs `/chat` 1304 ms、`/stream` TTFB 609 ms。
-   优化业务代码不会让聊天变快，瓶颈在上游生成。
-2. **流式把首字延迟砍半**：609 ms vs 1304 ms。这是产品指标，不是服务器指标。
-3. **`/chat` 没有排队**：`RPS ≈ 并发 / 延迟`（1.5 ≈ 2/1.304）。
-   等式成立说明服务端没有积压；低于这个值才说明有排队。
-
-> 局限：每组只有 10 个样本（P99 等于最大值）、同机压测（客户端与服务端抢 CPU）、
-> 单进程、Windows 定时器精度约 15 ms。数字是**单机下限**，不是集群容量。
-
----
+压测（`benchmark/`，11-10 实测）：`probe` 928 RPS @c=20（P50 14ms / P99 104ms）；
+`chat` P50 1304ms；流式 TTFB P50 609ms。**自研开销只占端到端 1~2%，瓶颈在上游**。
 
 ## 目录结构
 
 ```
-codeloom/
-├── Dockerfile / .dockerignore
-├── pyproject.toml / uv.lock
-├── docs/demo.gif               # README 演示动图
-├── src/app/
-│   ├── main.py                 # create_app + lifespan + request_id 中间件
-│   ├── core/                   # config / deps / errors / ratelimit / logging / sse
-│   ├── router/                 # chat / sessions / health / rag
-│   ├── service/                # chat_service（五步 + FC 循环 + 流式）/ rag_service（五步检索链路）
-│   ├── client/                 # llm.py 手写适配层 / lc_client.py LCEL 适配层
-│   ├── rag/                    # loader / splitter / vectorstore / retriever / rerank / prompt
-│   ├── tools/registry.py       # 工具 schema + 派发 + ast 白名单计算器
-│   ├── db/store.py             # SQLite(WAL) 会话与消息
-│   ├── schema/                 # chat.py / rag.py（Pydantic 契约）
-│   ├── prompts/system.py       # 对话系统提示词
-│   ├── static/                 # 演示页：index.html（流式）/ rag.html（知识库问答）
-│   └── agent|mcp_server|obs    # v1.0 预留
-├── tests/                      # 160 例
-├── benchmark/                  # 压测：loadgen.py（probe/chat/stream）+ run.sh
-├── scripts/                    # smoke.sh / build_corpus / index_corpus / eval_retrieval
-│                               # calibrate_rerank / compare_backends
-└── eval/                       # run.py（六项指标）+ gold/（金标）+ baseline*.json
+src/app/
+├── main.py              装配：lifespan / 中间件 / 静态页
+├── core/                配置、依赖注入、错误契约、日志、限流、SSE 帧
+├── schema/              Pydantic 契约（就是 /docs 的源码）
+├── client/              LLM 适配（手写 + LangChain 两种实现）
+├── service/             业务编排（chat / rag / agent）
+├── router/              接口层，只做协议转换
+├── rag/                 加载、切分、向量库、检索、重排、提示词
+├── tools/               工具注册表（AST 白名单）
+├── agent/               状态图与 checkpointer
+├── mcp_server/          MCP Server 与路径白名单
+├── obs/                 本地 trace 与 Langfuse 工厂
+├── db/                  SQLite 会话存储
+└── static/              演示页（v1.html / index.html / rag.html）
+eval/                    四套金标与门禁
+scripts/                 切分、建索引、预热、MCP 自测、部署（ops.py + 4 个封装）
+tests/                   240 例
 ```
-
----
 
 ## License
 
-MIT，见 [LICENSE](LICENSE)。
+MIT

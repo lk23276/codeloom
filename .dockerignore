@@ -21,7 +21,15 @@ __pycache__/
 !.env.example
 
 # ── 运行时产物 ──
-data/
+# 只放行示例语料：镜像要自带「切分 + 建索引」能力。
+# 真实语料、索引、数据库仍然不进镜像（它们可重建，且可能含私有内容）。
+data/*
+!data/corpus
+data/corpus/*
+!data/corpus/raw
+data/corpus/raw/*
+!data/corpus/raw/demo_*
+!data/corpus/raw/_README.txt
 *.db
 *.db-wal
 *.db-shm
@@ -39,11 +47,10 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 
-# ── 文档、评测、压测、脚本：镜像不需要 ──
+# ── 文档、评测、压测：镜像不需要（scripts 需要，镜像要能自己建索引）──
 docs/
 benchmark/
 eval/
-scripts/
 *.md
 !README.md
 
