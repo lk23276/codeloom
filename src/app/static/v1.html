@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeLoom v1.0 · 演示台</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    background: #f6f7f9; color: #1f2328;
+    font: 15px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  main { width: min(880px, 94vw); padding: 36px 0 64px; }
+
+  header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 21px; margin: 0; letter-spacing: -0.2px; }
+  .ver {
+    font-size: 11px; font-weight: 700; color: #1a7f37; background: #dafbe1;
+    border: 1px solid #aceebb; border-radius: 999px; padding: 2px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .sub { color: #6b7280; margin: 6px 0 18px; font-size: 13px; }
+  .sub a { color: #0969da; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+
+  .metrics {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px; margin: 0 0 20px;
+  }
+  .metric {
+    padding: 10px 12px; background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+  }
+  .metric b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .metric span { font-size: 11px; color: #6b7280; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    padding: 8px 14px; font: inherit; font-size: 13px; color: #57606a; cursor: pointer;
+    background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+  }
+  .tab[aria-selected="true"] {
+    color: #0969da; font-weight: 600; border-color: #b6e3ff; background: #ddf4ff;
+  }
+  .tab small { color: #8c959f; font-weight: 400; margin-left: 4px; }
+
+  .panel[hidden] { display: none; }
+  .row { display: flex; gap: 8px; }
+  input[type="text"] {
+    flex: 1; padding: 10px 12px; font: inherit; color: inherit;
+    border: 1px solid #d0d7de; border-radius: 8px; background: #fff;
+  }
+  input[type="text"]:focus { outline: 2px solid #0969da33; border-color: #0969da; }
+  button {
+    padding: 10px 18px; font: inherit; font-weight: 600; color: #fff;
+    background: #0969da; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  button:disabled { background: #9db8d6; cursor: not-allowed; }
+  button.ghost {
+    color: #24292f; background: #f6f8fa; border: 1px solid #d0d7de; font-weight: 500;
+  }
+  button.ghost:disabled { color: #8c959f; background: #f6f8fa; cursor: not-allowed; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; }
+  .chip {
+    padding: 5px 10px; font-size: 12px; color: #0969da; cursor: pointer;
+    background: #ddf4ff; border: 1px solid #b6e3ff; border-radius: 999px;
+  }
+  .chip:hover { background: #bce6ff; }
+
+  .opts { display: flex; gap: 14px; align-items: center; margin-top: 10px; font-size: 12px; color: #57606a; }
+  .opts label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+  .meta {
+    display: flex; gap: 14px; flex-wrap: wrap; margin: 14px 0 8px;
+    font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums;
+  }
+  .meta b { color: #1f2328; font-weight: 600; }
+  .ok { color: #1a7f37; }
+  .bad { color: #cf222e; }
+  .warn { color: #9a6700; }
+
+  .card {
+    padding: 16px 18px; background: #fff;
+    border: 1px solid #d0d7de; border-radius: 10px;
+  }
+  .card + .card { margin-top: 10px; }
+  .card h2 { font-size: 12px; font-weight: 600; color: #6b7280; margin: 0 0 8px; letter-spacing: .02em; }
+  .card.refused { border-color: #ffd8a8; background: #fffbf5; }
+  .card.error { border-color: #ffcecb; background: #fff5f5; }
+
+  .answer { word-break: break-word; }
+  .answer h3 { font-size: 15px; margin: 14px 0 6px; }
+  .answer p { margin: 0 0 8px; }
+  .answer ul { margin: 0 0 8px; padding-left: 20px; }
+  .answer li { margin: 2px 0; }
+  .answer code {
+    background: #eef1f4; padding: 1px 5px; border-radius: 4px;
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  .answer b { font-weight: 600; }
+
+  .bubbles { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .bubbles:empty::before { content: "输入问题开始；同一 session 会续聊，刷新后自动恢复历史。"; }
+  .bubble { max-width: 88%; padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+  .bubble.user { align-self: flex-end; background: #ddf4ff; border: 1px solid #b6e3ff; }
+  .bubble.bot { align-self: flex-start; background: #fff; border: 1px solid #d0d7de; }
+  .bubble.error { border-color: #ffcecb; background: #fff5f5; }
+  .bubble.note {
+    align-self: center; max-width: none; padding: 4px 10px; font-size: 12px;
+    color: #6b7280; background: #f6f8fa; border: 1px dashed #d0d7de;
+  }
+  .bubble .answer > :first-child { margin-top: 0; }
+  .bubble .answer > :last-child { margin-bottom: 0; }
+  .answer table {
+    border-collapse: collapse; margin: 6px 0 10px; font-size: 13px; display: block;
+    overflow-x: auto; max-width: 100%;
+  }
+  .answer th, .answer td { border: 1px solid #d0d7de; padding: 4px 8px; text-align: left; vertical-align: top; }
+  .answer th { background: #f6f8fa; font-weight: 600; white-space: nowrap; }
+  .answer pre {
+    margin: 6px 0 10px; padding: 10px 12px; overflow-x: auto;
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px;
+  }
+  .answer pre code { background: none; padding: 0; font-size: 12.5px; white-space: pre; }
+  .answer blockquote {
+    margin: 6px 0 10px; padding: 6px 12px; color: #57606a;
+    border-left: 3px solid #d0d7de; background: #fafbfc;
+  }
+  .answer hr { border: 0; border-top: 1px solid #eaeef2; margin: 12px 0; }
+  .answer ol { margin: 0 0 8px; padding-left: 20px; }
+
+  .session-bar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    margin-top: 10px; font-size: 12px; color: #6b7280;
+  }
+  .session-bar code {
+    background: #eef1f4; padding: 1px 5px; border-radius: 4px; font-size: 11.5px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .session-bar button { padding: 4px 10px; font-size: 12px; font-weight: 500; }
+  .opts select {
+    font: inherit; font-size: 12px; padding: 3px 6px; color: #24292f;
+    border: 1px solid #d0d7de; border-radius: 6px; background: #fff;
+  }
+
+  ol.cites { margin: 0; padding-left: 18px; font-size: 13px; }
+  ol.cites li { margin: 3px 0; }
+  ol.cites code {
+    background: #eef1f4; padding: 1px 5px; border-radius: 4px;
+    font: 12px ui-monospace, Consolas, monospace;
+  }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px;
+    background: #eef1f4; color: #57606a; margin-left: 6px; vertical-align: 1px;
+  }
+  .tag.ok { background: #dafbe1; color: #1a7f37; }
+  .tag.warn { background: #fff8c5; color: #9a6700; }
+  .tag.bad { background: #ffebe9; color: #cf222e; }
+
+  .empty { color: #8c959f; font-size: 13px; }
+  .hint {
+    margin-top: 14px; padding: 10px 12px; font-size: 12px; color: #57606a;
+    background: #fff; border: 1px dashed #d0d7de; border-radius: 8px;
+  }
+  .hint code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  footer { margin-top: 26px; font-size: 12px; color: #8c959f; line-height: 1.9; }
+  footer code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>CodeLoom</h1>
+    <span class="ver">v1.0.0</span>
+  </header>
+  <p class="sub">
+    可溯源的多 Agent 工程知识助手 · 三个入口一套验证　
+    <a href="/demo/">流式对话</a> ·
+    <a href="/demo/rag.html">知识库问答</a> ·
+    <a href="/docs">API 文档</a>
+  </p>
+
+  <div class="metrics">
+    <div class="metric"><b>87.5%</b><span>Hit@3（定位题 7/8）</span></div>
+    <div class="metric"><b>0.729</b><span>MRR@3</span></div>
+    <div class="metric"><b>7/7</b><span>无关问题拒答</span></div>
+    <div class="metric"><b>5/5</b><span>工具触发</span></div>
+    <div class="metric"><b>3/3</b><span>多轮记忆</span></div>
+    <div class="metric"><b>222</b><span>测试 · 90% 覆盖</span></div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="chat" aria-selected="true">对话 <small>/chat</small></button>
+    <button class="tab" role="tab" data-tab="rag" aria-selected="false">知识库 <small>/rag/ask</small></button>
+    <button class="tab" role="tab" data-tab="agent" aria-selected="false">Agent <small>/agent</small></button>
+  </div>
+
+  <!-- ── 对话 ── -->
+  <section class="panel" id="panel-chat">
+    <div class="row">
+      <input id="chat-input" type="text" placeholder="用一句话介绍 epoll" autocomplete="off">
+      <button id="chat-send">发送</button>
+    </div>
+    <div class="chips" id="chat-chips"></div>
+    <div class="opts">
+      <span>多轮对话：页面记住 <code>session_id</code>，刷新后从服务端恢复历史</span>
+      <label>长度
+        <select id="chat-max">
+          <option value="300">短（300）</option>
+          <option value="1000">标准（1000）</option>
+          <option value="2000">详细（2000）</option>
+          <option value="5000" selected>很长（5000）</option>
+        </select>
+      </label>
+    </div>
+    <div class="session-bar" id="chat-session"></div>
+    <div id="chat-meta" class="meta"></div>
+    <div id="chat-out" class="bubbles"></div>
+  </section>
+
+  <!-- ── 知识库 ── -->
+  <section class="panel" id="panel-rag" hidden>
+    <div class="row">
+      <input id="rag-input" type="text" placeholder="写半包续发在哪里实现" autocomplete="off">
+      <button id="rag-send">提问</button>
+    </div>
+    <div class="chips" id="rag-chips"></div>
+    <div class="opts"><span>检索自有语料，回答带 <code>文件:行号</code> 引用；依据不足直接拒答</span></div>
+    <div id="rag-meta" class="meta"></div>
+    <div id="rag-out"></div>
+  </section>
+
+  <!-- ── Agent ── -->
+  <section class="panel" id="panel-agent" hidden>
+    <div class="row">
+      <input id="agent-input" type="text" placeholder="12*7 等于几" autocomplete="off">
+      <button id="agent-send">发送</button>
+    </div>
+    <div class="chips" id="agent-chips"></div>
+    <div class="opts">
+      <label><input id="agent-hitl" type="checkbox"> 执行工具前暂停（HITL）</label>
+      <button id="agent-reset" class="ghost" type="button">新会话</button>
+      <span>历史来自 checkpointer，刷新后自动恢复</span>
+    </div>
+    <div class="session-bar" id="agent-session"></div>
+    <div id="agent-meta" class="meta"></div>
+    <div id="agent-out" class="bubbles"></div>
+    <div id="agent-actions" class="meta"></div>
+  </section>
+
+  <div class="hint">
+    每次响应都带 <code>X-Request-ID</code>；同一次请求的三个 span
+    （<code>retrieve</code> / <code>rerank</code> / <code>llm</code>）会追加到
+    <code>data/traces.jsonl</code>，<code>trace_id</code> 就是那个串。
+  </div>
+
+  <footer>
+    三个入口的边界：<code>/chat</code> 轻问答（SQLite 会话） ·
+    <code>/rag/ask</code> 文档问答（无状态，带引用与拒答） ·
+    <code>/agent</code> 工具/多步（checkpointer 记忆，可暂停审批）。<br>
+    指标为本机实测：8 条定位题 + 7 条无关题，语料 7 文件 / 139 块，<code>k=3</code>；
+    用仓库自带的示例语料重跑不会复现这些数字。
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+/* ── 工具函数 ── */
+
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
+
+/** 极简 Markdown：标题 / 粗体 / 行内代码 / 无序列表。先转义再套标签。 */
+function inline(s) {
+  let out = esc(s);
+  out = out.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  out = out.replace(/\*\*/g, "");   // 落单的 **：模型输出被 token 上限截断时常见
+  return out;
+}
+
+/**
+ * 轻量 Markdown 渲染。支持：代码块 / 表格 / 标题 / 有序与无序列表 / 引用 / 分割线 / 粗体 / 行内代码。
+ * ★ 先 esc() 再套标签：模型输出是不可信内容，直接拼 innerHTML 会开 XSS 口子。
+ */
+function md(text) {
+  const lines = String(text ?? "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let list = null;                       // "ul" | "ol"
+  let i = 0;
+
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const cells = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // 代码块
+    if (/^\s*```/.test(line)) {
+      closeList();
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      out.push(`<pre><code>${esc(buf.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    // 表格：本行含 | 且下一行是分隔行
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+      closeList();
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) { rows.push(cells(lines[i])); i++; }
+      out.push(
+        "<table><thead><tr>" + head.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>" +
+        rows.map((r) => "<tr>" + r.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>").join("") +
+        "</tbody></table>"
+      );
+      continue;
+    }
+
+    if (/^#{1,6}\s+/.test(line)) { closeList(); out.push(`<h3>${inline(line.replace(/^#{1,6}\s+/, ""))}</h3>`); i++; continue; }
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { closeList(); out.push("<hr>"); i++; continue; }
+
+    if (/^\s*>\s?/.test(line)) {
+      closeList();
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
+      out.push(`<blockquote>${inline(buf.join(" "))}</blockquote>`);
+      continue;
+    }
+
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
+      out.push(`<li>${inline(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>`); i++; continue;
+    }
+
+    if (/^\s*[-*+]\s+/.test(line)) {
+      if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
+      out.push(`<li>${inline(line.replace(/^\s*[-*+]\s+/, ""))}</li>`); i++; continue;
+    }
+
+    if (!line.trim()) { closeList(); i++; continue; }
+
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
+    i++;
+  }
+  closeList();
+  return out.join("\n");
+}
+
+function metaRow(pairs) {
+  return pairs
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v, cls]) => `<span>${esc(k)} <b class="${cls || ""}">${esc(v)}</b></span>`)
+    .join("");
+}
+
+async function post(path, body) {
+  const resp = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const rid = resp.headers.get("X-Request-ID") || "";
+  let payload;
+  try { payload = await resp.json(); }
+  catch { payload = { code: "BAD_RESPONSE", msg: "响应不是 JSON", data: null }; }
+  return { ok: resp.ok && payload.code === "OK", status: resp.status, rid, payload };
+}
+
+function renderError(host, r) {
+  const msg = r.payload?.msg || "请求失败";
+  const code = r.payload?.code || "ERROR";
+  host.innerHTML =
+    `<div class="card error"><h2>请求失败</h2>` +
+    `<p>HTTP ${esc(r.status)} · <code>${esc(code)}</code> · ${esc(msg)}</p>` +
+    `<p class="empty">request_id：<code>${esc(r.rid || r.payload?.request_id || "-")}</code></p></div>`;
+}
+
+function busy(btn, on, label) {
+  btn.disabled = on;
+  if (label) btn.textContent = on ? "处理中…" : label;
+}
+
+/* ── 指标条 ── */
+
+/* ── 对话（多轮：session_id 存 localStorage，刷新后拉回历史）── */
+const CHAT_CHIPS = ["用一句话介绍 epoll", "SSE 与 WebSocket 的区别", "为什么日志要结构化"];
+const CHAT_KEY = "codeloom.chat.session";
+// ★ 上限受接口契约约束（ge=1 le=5000）；超了会被 422 拒绝（实测 1500 在旧契约下就是 422）。
+//   默认「很长」：讲解类问题在 1000 处必断、2000 只够中等篇幅，演示页不该让人先撞一次截断。
+const DEFAULT_MAX_TOKENS = 5000;
+const maxTokens = () => Number($("chat-max").value) || DEFAULT_MAX_TOKENS;
+let chatSession = localStorage.getItem(CHAT_KEY) || "";
+
+function bubble(role, text) {
+  const el = document.createElement("div");
+  el.className = "bubble " + (role === "user" ? "user" : "bot");
+  el.innerHTML = `<div class="answer">${role === "user" ? esc(text) : md(text)}</div>`;
+  return el;
+}
+
+function bubbleError(r) {
+  const el = document.createElement("div");
+  el.className = "bubble bot error";
+  el.innerHTML =
+    `<div class="answer"><b>请求失败</b> · HTTP ${esc(r.status)} · <code>${esc(r.payload?.code || "ERROR")}</code><br>` +
+    `${esc(r.payload?.msg || "")}<br><span class="empty">request_id ${esc(r.rid || "-")}</span></div>`;
+  return el;
+}
+
+function renderSessionBar() {
+  const bar = $("chat-session");
+  if (!chatSession) {
+    bar.innerHTML = `<span>当前：新会话（发送后生成 session_id）</span>`;
+    return;
+  }
+  bar.innerHTML =
+    `<span>session</span><code>${esc(chatSession)}</code>` +
+    `<button class="ghost" id="chat-copy" type="button">复制</button>` +
+    `<button class="ghost" id="chat-new" type="button">新建会话</button>`;
+
+  $("chat-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(chatSession);
+      $("chat-copy").textContent = "已复制";
+    } catch {
+      $("chat-copy").textContent = "复制失败";
+    }
+  });
+  $("chat-new").addEventListener("click", () => {
+    chatSession = "";
+    localStorage.removeItem(CHAT_KEY);
+    $("chat-out").innerHTML = "";
+    $("chat-meta").innerHTML = "";
+    renderSessionBar();
+  });
+}
+
+async function restoreHistory() {
+  if (!chatSession) return;
+  try {
+    const resp = await fetch(`/sessions/${encodeURIComponent(chatSession)}/messages`);
+    if (!resp.ok) {
+      // 服务端没这个会话（换库 / 被清理）：当作新会话，不报错
+      chatSession = "";
+      localStorage.removeItem(CHAT_KEY);
+      renderSessionBar();
+      return;
+    }
+    const payload = await resp.json();
+    const list = payload.data.messages || [];
+    for (const m of list) {
+      $("chat-out").appendChild(bubble(m.role === "user" ? "user" : "bot", m.content));
+    }
+    if (list.length) {
+      $("chat-meta").innerHTML = metaRow([
+        ["历史", `${payload.data.count} 条消息`],
+        ["session", chatSession.slice(0, 8) + "…"],
+      ]);
+    }
+  } catch {
+    /* 恢复失败不打断使用 */
+  }
+}
+
+$("chat-chips").innerHTML = CHAT_CHIPS.map((q) => `<span class="chip">${esc(q)}</span>`).join("");
+$("chat-chips").addEventListener("click", (e) => {
+  if (!e.target.classList.contains("chip")) return;
+  $("chat-input").value = e.target.textContent;
+  $("chat-send").click();
+});
+
+$("chat-send").addEventListener("click", async () => {
+  const message = $("chat-input").value.trim();
+  if (!message) return;
+  const btn = $("chat-send");
+  const out = $("chat-out");
+  busy(btn, true);
+  $("chat-input").value = "";
+  $("chat-meta").innerHTML = "";
+  out.appendChild(bubble("user", message));
+  const typing = bubble("bot", "生成中…");
+  out.appendChild(typing);
+  typing.scrollIntoView({ block: "nearest" });
+  try {
+    // ★ 续聊的关键：把上一次拿到的 session_id 原样带回去
+    const limit = maxTokens();
+    const body = { message, max_tokens: limit };
+    if (chatSession) body.session_id = chatSession;
+
+    const r = await post("/chat", body);
+    if (!r.ok) { typing.replaceWith(bubbleError(r)); return; }
+
+    const d = r.payload.data;
+    chatSession = d.session_id;
+    localStorage.setItem(CHAT_KEY, chatSession);
+    typing.replaceWith(bubble("bot", d.reply));
+    renderSessionBar();
+    // ★ 没有 finish_reason 字段，用「生成 token 触顶」判断是否可能被截断
+    const truncated = d.usage.completion_tokens >= limit;
+    $("chat-meta").innerHTML = metaRow([
+      ["tokens", `${d.usage.prompt_tokens} / ${d.usage.completion_tokens}`],
+      ["session", d.session_id.slice(0, 8) + "…"],
+      ["request_id", r.rid],
+      truncated ? ["提示", `已达 ${limit} token 上限，回答可能不完整`, "warn"] : "",
+    ].filter(Boolean));
+  } catch (err) {
+    typing.classList.add("error");
+    typing.innerHTML = `<div class="answer">网络错误：${esc(err.message)}</div>`;
+  } finally {
+    busy(btn, false, "发送");
+  }
+});
+
+renderSessionBar();
+restoreHistory();
+
+/* ── 知识库 ── */
+const RAG_CHIPS = [
+  "写半包续发在哪里实现",              // top_score +4.17，直接作答
+  "为什么要用 eventfd 唤醒",           // top_score +5.52
+  "server2 的 Reactor 是怎么分层的",   // top_score +3.39
+  "分析一下 A 股下周走势",             // 低于阈值 -> 演示拒答，不产生模型调用
+];
+let ragLast = null;
+
+$("rag-chips").innerHTML = RAG_CHIPS.map((q) => `<span class="chip">${esc(q)}</span>`).join("");
+$("rag-chips").addEventListener("click", (e) => {
+  if (!e.target.classList.contains("chip")) return;
+  $("rag-input").value = e.target.textContent;
+  $("rag-send").click();
+});
+
+$("rag-send").addEventListener("click", async () => {
+  const question = $("rag-input").value.trim();
+  if (!question) return;
+  const btn = $("rag-send");
+  busy(btn, true);
+  $("rag-meta").innerHTML = "";
+  $("rag-out").innerHTML = `<div class="card"><span class="empty">检索中…（首次会加载重排模型）</span></div>`;
+  try {
+    const r = await post("/rag/ask", { question });
+    if (!r.ok) { renderError($("rag-out"), r); return; }
+    const d = r.payload.data;
+    ragLast = d;
+
+    const score = d.top_score == null ? "—" : Number(d.top_score).toFixed(2);
+    $("rag-meta").innerHTML = metaRow([
+      ["召回", d.recalled],
+      ["精排", d.reranked],
+      ["top_score", score],
+      ["引用", d.citations.length],
+      ["tokens", `${d.usage.prompt_tokens} / ${d.usage.completion_tokens}`],
+      ["耗时", `${d.latency_ms} ms`],
+      ["request_id", r.rid],
+    ]);
+
+    if (d.refused) {
+      $("rag-out").innerHTML =
+        `<div class="card refused"><h2>已拒答 <span class="tag warn">refused</span></h2>` +
+        `<p class="answer">${md(d.answer)}</p>` +
+        `<p class="empty">依据不足时不产生模型调用。</p></div>`;
+      return;
+    }
+
+    const cites = d.citations.map((c) => {
+      const loc = `${esc(c.source)}:${c.line_start}-${c.line_end}`;
+      return `<li><code>${loc}</code> <span class="tag">score ${Number(c.score).toFixed(2)}</span></li>`;
+    }).join("");
+
+    $("rag-out").innerHTML =
+      `<div class="card"><h2>回答</h2><div class="answer">${md(d.answer)}</div></div>` +
+      `<div class="card"><h2>引用</h2>` +
+      (cites ? `<ol class="cites">${cites}</ol>` : `<span class="empty">无引用</span>`) +
+      (d.invalid_citations ? `<p class="empty warn">模型给出了 ${d.invalid_citations} 个越界编号，已丢弃</p>` : "") +
+      `</div>`;
+  } catch (err) {
+    $("rag-out").innerHTML = `<div class="card error"><h2>网络错误</h2><p>${esc(err.message)}</p></div>`;
+  } finally {
+    busy(btn, false, "提问");
+  }
+});
+
+/* ── Agent（多轮：thread_id 存 localStorage，历史来自 checkpointer）── */
+const AGENT_CHIPS = ["12*7 等于几", "2 的 40 次方是多少", "123456789 乘以 987654321"];
+const AGENT_KEY = "codeloom.agent.thread";
+let agentThread = localStorage.getItem(AGENT_KEY) || "";
+let agentPaused = false;
+
+function note(text) {
+  const el = document.createElement("div");
+  el.className = "bubble note";
+  el.innerHTML = esc(text);
+  return el;
+}
+
+function renderThreadBar() {
+  const bar = $("agent-session");
+  if (!agentThread) {
+    bar.innerHTML = `<span>当前：新 thread（发送后生成 thread_id）</span>`;
+    return;
+  }
+  bar.innerHTML =
+    `<span>thread</span><code>${esc(agentThread)}</code>` +
+    `<button class="ghost" id="agent-copy" type="button">复制</button>`;
+  $("agent-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(agentThread);
+      $("agent-copy").textContent = "已复制";
+    } catch {
+      $("agent-copy").textContent = "复制失败";
+    }
+  });
+}
+
+function setPaused(paused) {
+  agentPaused = paused;
+  $("agent-actions").innerHTML = "";
+  if (!paused) return;
+  $("agent-actions").innerHTML = `<button id="agent-approve" type="button">审批并继续</button>`;
+  $("agent-approve").addEventListener("click", approve);
+}
+
+function renderAgentMeta(d, rid) {
+  $("agent-meta").innerHTML = metaRow([
+    ["帧", d.steps],
+    ["工具", d.tool_calls.length ? d.tool_calls.join(", ") : "—"],
+    ["tokens", `${d.usage.prompt_tokens} / ${d.usage.completion_tokens}`],
+    ["耗时", `${d.latency_ms} ms`],
+    ["request_id", rid],
+  ]);
+}
+
+async function restoreAgentHistory() {
+  if (!agentThread) return;
+  try {
+    const resp = await fetch(`/agent/${encodeURIComponent(agentThread)}/messages`);
+    if (!resp.ok) {
+      agentThread = "";
+      localStorage.removeItem(AGENT_KEY);
+      renderThreadBar();
+      return;
+    }
+    const payload = await resp.json();
+    const data = payload.data;
+    for (const m of data.messages) {
+      $("agent-out").appendChild(bubble(m.role === "user" ? "user" : "bot", m.content));
+    }
+    if (data.status === "awaiting_approval") {
+      $("agent-out").appendChild(note("上次停在审批点，未执行：" + data.pending.join("、")));
+      setPaused(true);
+    }
+    if (data.messages.length) {
+      $("agent-meta").innerHTML = metaRow([
+        ["历史", `${data.count} 条消息`],
+        ["状态", data.status],
+      ]);
+    }
+  } catch {
+    /* 恢复失败不打断使用 */
+  }
+}
+
+/** 一次 agent 调用的统一渲染：用户气泡 → 结果气泡（答案 / 待审批） */
+async function runAgent(payload, { echo = "" } = {}) {
+  const out = $("agent-out");
+  const btn = $("agent-send");
+  busy(btn, true);
+  $("agent-meta").innerHTML = "";
+  setPaused(false);
+
+  if (echo) out.appendChild(bubble("user", echo));
+  const typing = bubble("bot", "执行中…");
+  out.appendChild(typing);
+  typing.scrollIntoView({ block: "nearest" });
+
+  try {
+    const r = await post("/agent", payload);
+    if (!r.ok) { typing.replaceWith(bubbleError(r)); return; }
+
+    const d = r.payload.data;
+    agentThread = d.thread_id;
+    localStorage.setItem(AGENT_KEY, agentThread);
+    renderThreadBar();
+    renderAgentMeta(d, r.rid);
+
+    if (d.status === "awaiting_approval") {
+      typing.replaceWith(note("已暂停，工具尚未执行：" + d.pending.join("、")));
+      setPaused(true);
+      return;
+    }
+    typing.replaceWith(bubble("bot", d.answer || "（无正文）"));
+  } catch (err) {
+    typing.classList.add("error");
+    typing.innerHTML = `<div class="answer">网络错误：${esc(err.message)}</div>`;
+  } finally {
+    busy(btn, false, "发送");
+  }
+}
+
+async function approve() {
+  const out = $("agent-out");
+  out.appendChild(note("已审批，继续执行"));
+  await runAgent({ thread_id: agentThread, approve: true });
+}
+
+$("agent-chips").innerHTML = AGENT_CHIPS.map((q) => `<span class="chip">${esc(q)}</span>`).join("");
+$("agent-chips").addEventListener("click", (e) => {
+  if (!e.target.classList.contains("chip")) return;
+  $("agent-input").value = e.target.textContent;
+  $("agent-send").click();
+});
+
+$("agent-send").addEventListener("click", () => {
+  const message = $("agent-input").value.trim();
+  if (!message) return;
+  $("agent-input").value = "";
+  const payload = { message, hitl: $("agent-hitl").checked };
+  if (agentThread) payload.thread_id = agentThread;
+  runAgent(payload, { echo: message });
+});
+
+$("agent-reset").addEventListener("click", () => {
+  agentThread = "";
+  localStorage.removeItem(AGENT_KEY);
+  $("agent-out").innerHTML = "";
+  $("agent-meta").innerHTML = "";
+  setPaused(false);
+  renderThreadBar();
+});
+
+renderThreadBar();
+restoreAgentHistory();
+
+/* ── Tab 切换 ── */
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", "false"));
+    tab.setAttribute("aria-selected", "true");
+    document.querySelectorAll(".panel").forEach((p) => (p.hidden = true));
+    $("panel-" + tab.dataset.tab).hidden = false;
+  });
+});
+
+/* 初始态 */
+$("rag-out").innerHTML = `<div class="card"><span class="empty">提问后先检索、再重排、最后生成；依据不足会拒答。</span></div>`;
+</script>
+</body>
+</html>

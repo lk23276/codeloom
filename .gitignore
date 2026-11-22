@@ -73,6 +73,10 @@ benchmark/results/*.json
 *.swp
 *~
 
+# ── 评测产物 ──
+# runs/ 下是每次执行的快照（带时间戳），基线以 eval/baseline.json 为准
+eval/runs/*.json
+
 # ── 系统 ──
 .DS_Store
 Thumbs.db

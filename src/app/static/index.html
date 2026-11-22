@@ -15,6 +15,8 @@
   main { width: min(760px, 92vw); padding: 40px 0 64px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: #6b7280; margin: 0 0 24px; font-size: 13px; }
+  .sub a { color: #0969da; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
   .row { display: flex; gap: 8px; }
   input {
     flex: 1; padding: 10px 12px; font: inherit; color: inherit;
@@ -44,7 +46,8 @@
 <body>
 <main>
   <h1>CodeLoom · 流式问答</h1>
-  <p class="sub">同一个服务、同一个端口：页面用 <code>fetch</code> 读 SSE，逐帧渲染。</p>
+  <p class="sub">同一个服务、同一个端口：页面用 <code>fetch</code> 读 SSE，逐帧渲染。
+    <a href="/demo/v1.html">v1.0 演示台</a> · <a href="/demo/rag.html">知识库问答</a></p>
 
   <div class="row">
     <input id="q" value="用一句话介绍 epoll" maxlength="2000"

@@ -16,6 +16,8 @@
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: #6b7280; margin: 0 0 20px; font-size: 13px; }
   .sub code { background: #eef1f4; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .sub a { color: #0969da; text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
 
   .row { display: flex; gap: 8px; }
   input {
@@ -116,6 +118,7 @@
   <p class="sub">
     检索 <code>139</code> 个语料块 → cross-encoder 精排 → 回答带 <code>文件:行号</code> 引用；
     依据不足时直接拒答，不调用模型。
+    <a href="/demo/v1.html">v1.0 演示台</a> · <a href="/demo/">流式对话</a>
   </p>
 
   <div class="row">
