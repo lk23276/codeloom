@@ -74,11 +74,19 @@ class FastEmbedReranker:
         if self._encoder is None:
             cls = _cross_encoder_cls()
             logger.info("加载重排模型 model=%s", self.model_name)
-            self._encoder = cls(
-                model_name=self.model_name,
-                cache_dir=self._cache_dir,
-                lazy_load=True,
-            )
+            try:
+                self._encoder = cls(
+                    model_name=self.model_name,
+                    cache_dir=self._cache_dir,
+                    lazy_load=True,
+                )
+            except Exception as exc:  # noqa: BLE001 —— 下载/加载失败形态很杂（OSError/ValueError/SSL）
+                # ★ 转成领域异常：上层据此回 502 + 可操作文案，
+                #   而不是让原始异常冒到全局处理器变成「服务器内部错误」。
+                raise RerankNotAvailableError(
+                    f"重排模型 {self.model_name} 加载失败（下载失败时设 HF_ENDPOINT 或预下载）："
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
             logger.info("重排模型就绪 model=%s", self.model_name)
         return self._encoder
 

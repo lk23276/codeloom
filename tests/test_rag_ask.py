@@ -106,6 +106,87 @@ def make_service(
     return svc, llm, reranker
 
 
+# ══════════════════════ 零、输入卫生 ══════════════════════
+
+
+def test_blank_question_is_rejected(client: TestClient) -> None:
+    """纯空白问题要 422：检索层会返回空列表，最终表现成「知识库为空」，容易误导。"""
+    resp = client.post("/rag/ask", json={"question": "   "})
+
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "VALIDATION_ERROR"
+
+
+# ══════════════════════ 零之二、模型不可用 ══════════════════════
+
+
+class ExplodingReranker:
+    """模拟「重排模型下载失败 / 加载失败」。"""
+
+    def score(self, query: str, documents: list[str]) -> list[float]:
+        from app.rag.rerank import RerankNotAvailableError
+
+        raise RerankNotAvailableError(
+            "重排模型 BAAI/bge-reranker-base 加载失败：Network is unreachable"
+        )
+
+
+async def test_rerank_failure_becomes_upstream_error() -> None:
+    """模型没就绪要回 502（UpstreamError），不能漏成 500。
+
+    ★ 依据：容器里没设 HF_ENDPOINT 时，首个 /rag/ask 会卡 70 秒然后
+      `ValueError: Could not load model ...` 冒到全局处理器 → INTERNAL_ERROR。
+      客户端无从判断是「模型没下下来」还是「代码写错了」。
+    """
+    from app.core.errors import UpstreamError
+
+    svc = RagService(
+        FakeClient(reply="x"),
+        ExplodingReranker(),
+        recall_k=20,
+        top_n=5,
+        min_score=0.2,
+        retrieve_fn=lambda _q, _k: candidates(),
+    )
+
+    with pytest.raises(UpstreamError) as excinfo:
+        await svc.ask(RagRequest(question="eventfd 怎么唤醒"))
+
+    assert "重排模型" in str(excinfo.value)
+    assert "HF_ENDPOINT" in str(excinfo.value)
+
+
+class ExplodingEmbeddings:
+    """模拟「向量模型加载失败」。"""
+
+    def embed_query(self, text: str):
+        from app.rag.vectorstore import EmbeddingNotAvailableError
+
+        raise EmbeddingNotAvailableError("向量模型加载失败：Network is unreachable")
+
+
+async def test_embedding_failure_becomes_upstream_error() -> None:
+    from app.core.errors import UpstreamError
+    from app.rag.vectorstore import EmbeddingNotAvailableError
+
+    def boom(_q: str, _k: int):
+        raise EmbeddingNotAvailableError("向量模型加载失败：Network is unreachable")
+
+    svc = RagService(
+        FakeClient(reply="x"),
+        FakeReranker({}),
+        recall_k=20,
+        top_n=5,
+        min_score=0.2,
+        retrieve_fn=boom,
+    )
+
+    with pytest.raises(UpstreamError) as excinfo:
+        await svc.ask(RagRequest(question="eventfd 怎么唤醒"))
+
+    assert "向量模型" in str(excinfo.value)
+
+
 # ══════════════════════ 一、编排：拒答与作答 ══════════════════════
 
 

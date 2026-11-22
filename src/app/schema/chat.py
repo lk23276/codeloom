@@ -11,13 +11,22 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
     """一轮对话的请求。"""
 
     message: str = Field(min_length=1, max_length=2000, description="用户这一轮说的话")
+
+    @field_validator("message")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        """纯空白视同空串：`min_length=1` 拦不住 `"   "`，而它会白烧一次调用。"""
+        text = value.strip()
+        if not text:
+            raise ValueError("message 不能只包含空白字符")
+        return text
 
     session_id: str | None = Field(
         default=None,
@@ -33,7 +42,9 @@ class ChatRequest(BaseModel):
         description="带多少条历史给模型（越少越省钱）",
     )
 
-    max_tokens: int = Field(default=200, ge=1, le=1000, description="输出 token 上限")
+    # ★ 上限 5000：讲解类问题（表格 + 代码块）实测 1000 处会在半句截断，2000 也只够中等篇幅。
+    #   成本闸门在 default（200），不在上限 —— 不传就用默认值，不会因为上限高而多花钱。
+    max_tokens: int = Field(default=200, ge=1, le=5000, description="输出 token 上限")
 
 
 class UsageInfo(BaseModel):

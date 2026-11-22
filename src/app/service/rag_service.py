@@ -26,9 +26,11 @@ from langchain_core.documents import Document
 from app.client.llm import LLMClient, LLMError
 from app.core.async_utils import run_sync
 from app.core.errors import UpstreamError
+from app.obs.local_trace import NullTracer, Tracer
 from app.rag.prompt import build_rag_messages, parse_citation_indices
-from app.rag.rerank import Reranker
+from app.rag.rerank import Reranker, RerankNotAvailableError
 from app.rag.retriever import retrieve_with_score
+from app.rag.vectorstore import EmbeddingNotAvailableError
 from app.schema.chat import UsageInfo
 from app.schema.rag import Citation, RagAnswer, RagRequest
 
@@ -62,6 +64,7 @@ class RagService:
         top_n: int = 5,
         min_score: float = 0.2,
         retrieve_fn: RetrieveFn | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self._llm = llm
         self._reranker = reranker
@@ -69,6 +72,8 @@ class RagService:
         self._top_n = top_n
         self._min_score = min_score
         self._retrieve: RetrieveFn = retrieve_fn or default_retrieve
+        # 默认不记：测试与脚本不该产生 trace 文件；线上由 deps 注入真 tracer
+        self._tracer: Tracer = tracer or NullTracer()
         self.model = llm.model
 
     async def ask(self, req: RagRequest) -> RagAnswer:
@@ -77,16 +82,33 @@ class RagService:
         top_n = req.top_n or self._top_n
 
         # ① 粗召回。宽一些，给重排留出捞回的空间。
-        candidates = await run_sync(self._retrieve, req.question, self._recall_k)
+        with self._tracer.span("retrieve", k=self._recall_k) as span:
+            try:
+                candidates = await run_sync(self._retrieve, req.question, self._recall_k)
+            except EmbeddingNotAvailableError as exc:
+                # ★ 502 而不是 500：这是「依赖没就绪」，不是「服务写错了」。
+                logger.warning("rag_embedding_unavailable: %s", exc)
+                raise UpstreamError(
+                    f"{exc}（下载失败时设置 HF_ENDPOINT，或执行 scripts/prefetch_models.py 预下载）"
+                ) from exc
+            span["hits"] = len(candidates)
         if not candidates:
             logger.info("rag_empty reason=%s", EMPTY_KB_REASON)
             return self._refuse(req, EMPTY_KB_REASON, started)
 
         # ② 精排。cross-encoder 逐对打分，只对候选集做，不做全库。
         documents = [doc for doc, _ in candidates]
-        scores = await run_sync(
-            self._reranker.score, req.question, [doc.page_content for doc in documents]
-        )
+        with self._tracer.span("rerank", candidates=len(documents)) as span:
+            try:
+                scores = await run_sync(
+                    self._reranker.score, req.question, [doc.page_content for doc in documents]
+                )
+            except RerankNotAvailableError as exc:
+                logger.warning("rag_rerank_unavailable: %s", exc)
+                raise UpstreamError(
+                    f"{exc}（下载失败时设置 HF_ENDPOINT，或执行 scripts/prefetch_models.py 预下载）"
+                ) from exc
+            span["scored"] = len(scores)
         # 防御：长度不一致会让候选与分数错位，而错位不报错、只是答案对应到别的文件。
         if len(scores) != len(documents):
             raise UpstreamError(
@@ -119,10 +141,14 @@ class RagService:
 
         # ④ 作答。提示词只允许引用编号，位置由下一步映射。
         try:
-            result = await self._llm.achat(
-                build_rag_messages(req.question, ranked),
-                max_tokens=req.max_tokens,
-            )
+            with self._tracer.span("llm", model=self.model, top_n=len(ranked)) as span:
+                result = await self._llm.achat(
+                    build_rag_messages(req.question, ranked),
+                    max_tokens=req.max_tokens,
+                )
+                # llm 这层必须带 token：否则 trace 里看不到成本归因
+                span["prompt_tokens"] = result.usage.prompt_tokens
+                span["completion_tokens"] = result.usage.completion_tokens
         except LLMError as exc:
             logger.warning("rag_llm_failed: %s", exc)
             raise UpstreamError(f"模型服务暂时不可用：{type(exc).__name__}") from exc

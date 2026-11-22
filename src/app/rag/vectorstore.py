@@ -65,7 +65,13 @@ class FastEmbedEmbeddings(Embeddings):
         if self._model is None:
             cls = _fastembed_cls()
             logger.info("加载 embedding 模型 model=%s", self.model_name)
-            self._model = cls(model_name=self.model_name, cache_dir=self._cache_dir)
+            try:
+                self._model = cls(model_name=self.model_name, cache_dir=self._cache_dir)
+            except Exception as exc:  # noqa: BLE001
+                raise EmbeddingNotAvailableError(
+                    f"向量模型 {self.model_name} 加载失败（下载失败时设 HF_ENDPOINT 或预下载）："
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
             logger.info("embedding 模型就绪 model=%s", self.model_name)
         return self._model
 

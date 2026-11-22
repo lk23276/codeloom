@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schema.chat import UsageInfo
 
@@ -16,6 +16,15 @@ class RagRequest(BaseModel):
     """一次知识库问答的请求。"""
 
     question: str = Field(min_length=1, max_length=2000, description="要查的问题")
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        """纯空白视同空问题：检索层会返回空列表，最终表现成「知识库为空」，容易误导。"""
+        text = value.strip()
+        if not text:
+            raise ValueError("question 不能只包含空白字符")
+        return text
 
     top_n: int | None = Field(
         default=None,
@@ -26,7 +35,9 @@ class RagRequest(BaseModel):
 
     # 默认 800：检索增强的回答带引用与小段代码，实测「解释一个机制」这类问题
     # 在 500 处会停在代码块中间。上限只限制长度，不产生额外调用。
-    max_tokens: int = Field(default=800, ge=1, le=1000, description="输出 token 上限")
+    # ★ 上限 5000：讲解类问题（表格 + 代码块）实测 1000 处会在半句截断，2000 也只够中等篇幅。
+    #   成本闸门在 default（800），不在上限 —— 不传就用默认值，不会因为上限高而多花钱。
+    max_tokens: int = Field(default=800, ge=1, le=5000, description="输出 token 上限")
 
 
 class Citation(BaseModel):
