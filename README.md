@@ -102,7 +102,15 @@ uv run python scripts/index_corpus.py    # 建索引（首次下 90 MB 向量模
 uv run uvicorn app.main:app --port 8000 --workers 1
 ```
 
-打开 `http://127.0.0.1:8000/demo/v1.html`（总览台），或 `/demo/`（流式）、`/demo/rag.html`（知识库）。
+三个演示页由同一个 FastAPI 提供，同源、单文件、零构建：
+
+| 页面 | 演示什么 |
+|---|---|
+| `/demo/v1.html` | 一页打通三个入口；Agent 面板带 thread 记忆与审批；顶部是实测指标 |
+| `/demo/` | 逐字渲染，显示首字耗时 / 总耗时 / delta 帧数 |
+| `/demo/rag.html` | 带行号的引用、按编号跳转、拒答状态与重排分数 |
+
+![流式问答演示：同一次请求的逐帧推送](docs/demo.gif)
 
 一次真实调用的帧序列（中间省略）：
 
