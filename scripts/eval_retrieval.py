@@ -2,7 +2,9 @@
 
 用法：
     uv run python scripts/eval_retrieval.py
-    uv run python scripts/eval_retrieval.py --k 5 --out eval/runs/retrieval_baseline.md
+    uv run python scripts/eval_retrieval.py --k 5 --out eval/runs/retrieval.md
+
+`runs/` 下的产物已被 .gitignore 忽略；需要长期保留的基线写 `eval/baseline.json`。
 
 判定口径（刻意简单，只验证「能不能定位到」）：
 

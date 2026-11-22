@@ -74,8 +74,9 @@ benchmark/results/*.json
 *~
 
 # ── 评测产物 ──
-# runs/ 下是每次执行的快照（带时间戳），基线以 eval/baseline.json 为准
-eval/runs/*.json
+# runs/ 下是每次执行的快照（带时间戳），基线以 eval/baseline.json 为准。
+# 整目录忽略而不是只忽略 *.json：跑一次可能同时产出 .md 摘要，漏掉会长进仓库。
+eval/runs/
 
 # ── 系统 ──
 .DS_Store
