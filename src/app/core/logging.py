@@ -13,7 +13,7 @@
   （`contextvars.copy_context()`），所以 `run_sync()` 里跑的 SQLite 操作也带着同一个 id。
 
 ★ 两条纪律：
-  1. 日志里**永不出现密钥**——只允许 `settings.key_preview`（前 6 位 + ***）
+  1. 日志里**永不出现密钥**——只允许 `settings.key_state`（已配置 / 未配置）
   2. 字段名保持稳定：`request_id` / `duration_ms` / `status` 改了会让看板静默失效
 """
 
