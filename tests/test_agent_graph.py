@@ -7,68 +7,24 @@
 3. 工具异常是否变成 ToolMessage —— 抛穿会把整次请求变成 500
 4. `@tool` 的名字与参数 Schema 是否与手写路径一致 —— 不一致时模型会用错
 
-★ 用一个脚本化的假模型（`ScriptedChatModel`）而不是真模型：
+★ 用一个脚本化的假模型（`tests/_fakes.py` 的 `ScriptedChatModel`）而不是真模型：
   图的结构问题是确定性的，用真模型只会把「图错了」和「模型今天不听话」混在一起。
 """
 
 from __future__ import annotations
 
-from typing import Any, get_type_hints
+from typing import get_type_hints
 
 import pytest
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.graph.message import add_messages
 
 from app.agent.graph import AgentState, build_agent_graph
 from app.core.config import Settings
 from app.tools.lc_tools import LC_TOOLS, calculator
+from tests._fakes import ScriptedChatModel, tool_call
 
 # ══════════════════════ 替身 ══════════════════════
-
-
-class ScriptedChatModel(BaseChatModel):
-    """按顺序吐出预置消息的假模型。
-
-    `bind_tools` 直接返回自身：图会对模型调用它，但脚本已经决定了下一条消息，
-    这里的语义是「工具都已绑好」，不需要真的改行为。
-    """
-
-    responses: list[AIMessage]
-    calls: int = 0
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted"
-
-    def _generate(
-        self,
-        messages: list[Any],
-        stop: list[str] | None = None,
-        run_manager: Any = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        index = min(self.calls, len(self.responses) - 1)
-        self.calls += 1
-        return ChatResult(generations=[ChatGeneration(message=self.responses[index])])
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> ScriptedChatModel:
-        return self
-
-
-def tool_call(expression: str, call_id: str = "call_1") -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "calculator",
-                "args": {"expression": expression},
-                "id": call_id,
-                "type": "tool_call",
-            }
-        ],
-    )
 
 
 def build(responses: list[AIMessage]):

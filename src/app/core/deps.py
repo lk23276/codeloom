@@ -19,6 +19,7 @@ from fastapi import Request
 from app.client.llm import LLMClient
 from app.core.config import Settings
 from app.db.store import MessageStore
+from app.service.agent_service import AgentService
 from app.service.chat_service import ChatService
 from app.service.rag_service import RagService
 
@@ -66,4 +67,16 @@ def get_rag_service(request: Request) -> RagService:
         recall_k=cfg.rag_recall_k,
         top_n=cfg.rag_top_k,
         min_score=cfg.rag_min_rerank_score,
+        # 本地 JSONL tracer：不依赖账号，每个请求三个 span（retrieve / rerank / llm）
+        tracer=request.app.state.tracer,
     )
+
+
+def get_agent_service(request: Request) -> AgentService:
+    """Agent 服务。**单例**，在 lifespan 里创建。
+
+    ★ 与 `ChatService` / `RagService` 的最大区别：它有状态 —— 按 thread_id 分配的串行锁。
+      每次请求新建实例，锁就各自一份，等于没有串行化（同一 thread 的并发请求照样互相覆盖）。
+      这是「无状态服务可以随用随建，有状态服务必须复用」的一个具体例子。
+    """
+    return request.app.state.agent_service

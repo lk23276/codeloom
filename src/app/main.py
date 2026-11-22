@@ -18,24 +18,31 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from app import VERSION
+from app.agent.checkpoint import open_checkpointer
+from app.agent.graph import build_agent_graph
+from app.client.lc_client import build_chat_model
 from app.client.llm import LLMClient, build_client
 from app.core.config import Settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import request_id_var, setup_logging
 from app.core.ratelimit import KeyedLimiter, build_limiter
 from app.db.store import MessageStore
+from app.obs.langfuse import build_langfuse_handler
+from app.obs.local_trace import build_tracer
 from app.rag.rerank import Reranker, build_reranker
+from app.router import agent as agent_router
 from app.router import chat as chat_router
 from app.router import health as health_router
 from app.router import rag as rag_router
 from app.router import sessions as sessions_router
+from app.service.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +72,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm = llm
     app.state.ratelimit = limiter
     app.state.reranker = reranker
+
+    # ── Agent：checkpointer + 两张图 + 单例服务 ──
+    # 用 AsyncExitStack 管 checkpointer 的生命周期：sqlite 连接必须在关闭时释放，
+    # 而 lifespan 里同时要管「数据库连接」与「图状态库连接」两件事。
+    checkpoints = AsyncExitStack()
+    if getattr(app.state, "agent_graph", None) is None:
+        checkpointer = await checkpoints.enter_async_context(open_checkpointer(settings))
+        # 两张图共用一个模型实例与一个 checkpointer：
+        # 差别只在 compile 时的断点，其余结构完全一致
+        shared_model = build_chat_model(settings)
+        app.state.agent_graph = build_agent_graph(
+            settings, model=shared_model, checkpointer=checkpointer
+        )
+        app.state.agent_graph_hitl = build_agent_graph(
+            settings,
+            model=shared_model,
+            checkpointer=checkpointer,
+            interrupt_before=("tools",),
+        )
+    # 可观测：本地 tracer 永远可用；Langfuse 未配置时 handler 为 None
+    app.state.tracer = build_tracer(settings)
+    app.state.langfuse_handler = build_langfuse_handler(settings)
+    logger.info(
+        "trace local=%s path=%s langfuse=%s",
+        settings.trace_local,
+        settings.trace_path,
+        "on" if app.state.langfuse_handler else "off",
+    )
+
+    app.state.agent_service = AgentService(
+        graph=app.state.agent_graph,
+        graph_hitl=app.state.agent_graph_hitl,
+        recursion_limit=settings.agent_recursion_limit,
+    )
     logger.info(
         "启动完成 db=%s model=%s key=%s rate=%d/%ds rerank=%s",
         settings.db_path,
         settings.llm_model,
-        settings.key_preview,
+        settings.key_state,
         settings.rate_limit,
         settings.rate_window_s,
         settings.rag_rerank_model,
@@ -78,8 +119,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await checkpoints.aclose()
         store.close()
-        logger.info("已关闭数据库连接")
+        logger.info("已关闭数据库连接与图状态库")
 
 
 async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -138,6 +180,8 @@ def create_app(
     llm: LLMClient | None = None,
     db_path: str | None = None,
     reranker: Reranker | None = None,
+    agent_graph: object | None = None,
+    agent_graph_hitl: object | None = None,
 ) -> FastAPI:
     """装配一个 app。
 
@@ -146,6 +190,7 @@ def create_app(
       - `llm`：注入 FakeClient，不联网、不产生调用费用
       - `db_path`：指向 tmp_path，避免污染真实数据库
       - `reranker`：注入假重排器，避免在测试里下载约 1 GB 模型
+      - `agent_graph` / `agent_graph_hitl`：注入已编译的图，避免在测试里联网
     """
     cfg = settings or Settings()
     if db_path is not None:
@@ -166,6 +211,10 @@ def create_app(
         app.state.llm = llm
     if reranker is not None:
         app.state.reranker = reranker
+    # 注入的图会跳过 lifespan 里的「打开 checkpointer + 编译」分支
+    if agent_graph is not None:
+        app.state.agent_graph = agent_graph
+        app.state.agent_graph_hitl = agent_graph_hitl or agent_graph
 
     app.middleware("http")(request_context)
     register_exception_handlers(app)
@@ -173,6 +222,7 @@ def create_app(
     app.include_router(health_router.router)
     app.include_router(sessions_router.router)
     app.include_router(chat_router.router)
+    app.include_router(agent_router.router)
     app.include_router(rag_router.router)
 
     # ★ 同源演示页：页面和接口在同一个 origin，浏览器 fetch('/chat/stream') 不触发 CORS。

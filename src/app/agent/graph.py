@@ -21,9 +21,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AnyMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
@@ -53,12 +55,21 @@ def build_agent_graph(
     settings: Settings,
     *,
     model: Any | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    interrupt_before: Sequence[str] | None = None,
 ) -> CompiledStateGraph:
     """构造并编译图。
 
-    `model` 仅供测试注入（传一个假的 chat model 即可断言图结构，不联网、不花钱）；
-    生产路径留空，由 `build_chat_model()` 按 `Settings` 构造 —— 与 `/chat` 的
-    LangChain 后端共用同一份构造参数。
+    三个注入点，各有明确用途：
+
+    | 参数 | 用途 |
+    |---|---|
+    | `model` | 测试注入假模型，断言图结构而不联网、不花钱 |
+    | `checkpointer` | 记忆：不传则无状态；传 `InMemorySaver` / `AsyncSqliteSaver` 才有多轮 |
+    | `interrupt_before` | 静态断点：`("tools",)` 表示工具执行前暂停，等待 `Command`/`None` 恢复 |
+
+    ★ `checkpointer` 传了之后，**每次调用都必须带 `configurable.thread_id`**，
+      否则 LangGraph 直接报错 —— 没有「默认单线程」这回事。
     """
     llm = model or build_chat_model(settings)
     llm_with_tools = llm.bind_tools(LC_TOOLS)
@@ -82,7 +93,10 @@ def build_agent_graph(
     # ★ 回边是「循环」的来源：少了它，工具执行完图就结束，拿不到最终答案
     graph.add_edge("tools", "agent")
 
-    compiled = graph.compile()
+    compiled = graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=list(interrupt_before or ()),
+    )
     logger.debug(
         "agent 图已编译：节点=%s 工具=%s",
         list(compiled.nodes),
