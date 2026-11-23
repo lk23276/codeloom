@@ -1,4 +1,4 @@
-# CodeLoom（码络）· 可溯源的多 Agent 工程知识助手
+# CodeLoom（码络）· 可溯源的 Agent 工程知识问答服务
 
 > 面向**自有工程语料**（源码 + 项目文档）的问答服务：答案能落到 `server2.cpp:609-625` 这样的文件行号。
 > 重点是**用了服务端工程的方法把它做稳**：分层边界、流式与背压、限流、
@@ -98,7 +98,7 @@ Windows 用 `scripts\setup.ps1` / `run.ps1`，参数相同。首次会提示填 
 ```bash
 uv sync
 uv run python scripts/build_corpus.py    # 示例语料 → 13 块
-uv run python scripts/index_corpus.py    # 建索引（首次下 90 MB 向量模型）
+uv run python scripts/index_corpus.py --verify   # 建索引，并用独立进程确认能从磁盘加载
 uv run uvicorn app.main:app --port 8000 --workers 1
 ```
 

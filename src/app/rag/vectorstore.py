@@ -138,19 +138,30 @@ def ensure_indexed(
     *,
     batch_size: int = BATCH_SIZE,
 ) -> int:
-    """把块写入向量库，按稳定 id 做 upsert。
+    """把块写入向量库，按稳定 id 去重，返回**新增**条数。
 
     ★ 必须传 `ids`。不传时 LangChain 会为每个 `Document` 生成 uuid4，
       同一批数据写两次就是两条记录 —— 实测 3 条变 6 条。
       表现是检索结果里同一个块重复出现，Top-K 实际只覆盖一半的候选。
+
+    ★ 已存在的 id 直接跳过，不做 upsert。原因：Chroma 对同 id 的 upsert 是
+      「删旧 + 插新」，会重写 HNSW 段；若这次写入没走到完整收尾，段目录可能只剩
+      `index_metadata.pickle`，下一个进程打开即 `Error loading hnsw index`。
+      跳过之后，增量运行是零写入，索引文件不会被无谓重写。
     """
+    wanted = [str(item["id"]) for item in chunks]
+    existing: set[str] = set()
+    for start in range(0, len(wanted), 512):
+        existing.update(db._collection.get(ids=wanted[start : start + 512]).get("ids", []))
+
+    todo = [(str(item["id"]), item) for item in chunks if str(item["id"]) not in existing]
     total = 0
-    for start in range(0, len(chunks), batch_size):
-        part = chunks[start : start + batch_size]
+    for start in range(0, len(todo), batch_size):
+        part = todo[start : start + batch_size]
         documents = [
-            Document(page_content=item["text"], metadata=_metadata_of(item)) for item in part
+            Document(page_content=item["text"], metadata=_metadata_of(item)) for _, item in part
         ]
-        db.add_documents(documents, ids=[str(item["id"]) for item in part])
+        db.add_documents(documents, ids=[cid for cid, _ in part])
         total += len(part)
     return total
 
@@ -172,3 +183,16 @@ def _metadata_of(chunk: dict[str, Any]) -> dict[str, Any]:
 def count_chunks(db: Any) -> int:
     """当前集合的向量数。用于写入前后的一致性检查。"""
     return int(db._collection.count())
+
+
+def close_store(db: Any) -> None:
+    """显式关闭 Chroma 客户端，触发 HNSW 段落盘。
+
+    ★ 为什么必须有：写入只保证 sqlite 与内存一致，段目录可能只留下
+      `index_metadata.pickle`。此时计数校验完全正常，但下一个进程打开会报
+      `Error loading hnsw index` —— 只有在写完后显式关闭才会补齐二进制文件。
+    """
+    client = getattr(db, "_client", None)
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()

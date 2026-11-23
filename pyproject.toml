@@ -1,7 +1,7 @@
 [project]
 name = "codeloom"
 version = "1.0.0"
-description = "CodeLoom（码络）· 可溯源的多 Agent 工程知识助手"
+description = "CodeLoom（码络）· 可溯源的 Agent 工程知识问答服务"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

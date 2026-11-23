@@ -5,6 +5,7 @@
     uv run python scripts/index_corpus.py --rebuild       # 删库重建
     uv run python scripts/index_corpus.py --fake          # 用假向量，跳过模型下载
     uv run python scripts/index_corpus.py --smoke "写半包续发在哪实现"
+    uv run python scripts/index_corpus.py --verify         # 独立进程读一次，确认真能落盘加载
 
 产物在 `data/chroma/`，已被 `.gitignore` 覆盖：索引是派生物，可由本脚本重建。
 """
@@ -15,6 +16,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,6 +26,7 @@ from app.core.config import Settings
 from app.rag.vectorstore import (
     COLLECTION_NAME,
     build_embeddings,
+    close_store,
     count_chunks,
     ensure_indexed,
     get_vectorstore,
@@ -76,7 +79,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-mirror", action="store_true", help="不自动使用 HF 镜像")
     parser.add_argument("--smoke", default="", help="建库后跑一条检索验证")
     parser.add_argument("--k", type=int, default=3, help="冒烟检索返回条数")
+    parser.add_argument(
+        "--verify", action="store_true", help="写完后用独立进程读一次，确认索引能从磁盘加载"
+    )
     return parser
+
+
+def verify_in_new_process(persist_dir: Path) -> tuple[bool, str]:
+    """用独立进程读一次索引，确认落盘文件真的能被加载。
+
+    ★ 为什么必须换进程：写入时的客户端持有内存索引，即使 HNSW 段文件残缺也能查到结果，
+      只有新进程才会真正从磁盘加载。这类失败「计数校验」和 `--smoke` 都发现不了。
+    """
+    code = (
+        "from app.rag.retriever import retrieve_with_score\n"
+        "pairs = retrieve_with_score('索引完整性校验', k=1)\n"
+        "print(len(pairs))\n"
+    )
+    env = os.environ.copy()
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{src}{os.pathsep}{existing}" if existing else src
+    env["APP_RAG_PERSIST_DIR"] = str(persist_dir)
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=180
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        return False, tail[-1] if tail else f"退出码 {proc.returncode}"
+    return True, proc.stdout.strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -145,6 +176,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"{meta['source']}:{meta['line_start']}-{meta['line_end']}"
             )
             print(f"         {head}")
+
+    close_store(db)
+
+    if args.verify:
+        print("\n独立进程校验（模拟服务首次打开）")
+        ok, detail = verify_in_new_process(persist_dir)
+        if not ok:
+            print(f"      失败：新进程无法读取索引 —— {detail}", file=sys.stderr)
+            print("      处理：清空索引目录后重跑 --rebuild", file=sys.stderr)
+            return 1
+        print(f"      通过：新进程返回 {detail} 条结果")
 
     print("\n完成。")
     return 0

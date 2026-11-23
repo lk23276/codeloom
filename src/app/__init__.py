@@ -1,4 +1,4 @@
-"""CodeLoom（码络）· 可溯源的多 Agent 工程知识助手。
+"""CodeLoom（码络）· 可溯源的 Agent 工程知识问答服务。
 
 v0.5 的包结构：
     app.core     配置 / 装配 / 错误契约 / 限流 / 结构化日志 / SSE 帧

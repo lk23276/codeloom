@@ -339,3 +339,34 @@ def test_retrieve_honours_where_filter(tmp_path: Path) -> None:
 def test_retrieve_with_score_rejects_blank_query() -> None:
     """带分数的检索同样要拦空查询，避免无谓地打向量库。"""
     assert retrieve_with_score("  ") == []
+
+
+# ══════════════════════ 落盘：显式关闭 ══════════════════════
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_close_store_closes_client() -> None:
+    """写入后必须显式关闭：不关则 HNSW 段不落盘，下个进程会 `Error loading hnsw index`。
+
+    计数校验发现不了这类问题——sqlite 里的行数始终正确。
+    """
+    from app.rag.vectorstore import close_store
+
+    client = _FakeClient()
+    close_store(type("DB", (), {"_client": client})())
+
+    assert client.closed is True
+
+
+def test_close_store_tolerates_missing_client() -> None:
+    """用假替身或旧版本对象时没有 `_client`，不应抛异常。"""
+    from app.rag.vectorstore import close_store
+
+    close_store(object())

@@ -201,7 +201,7 @@ def create_app(
     app = FastAPI(
         title="CodeLoom API",
         version=VERSION,
-        description="可溯源的多 Agent 工程知识助手（v0.1：流式问答 + 会话记忆）",
+        description="可溯源的 Agent 工程知识问答服务（v1.0：对话、检索、Agent 三入口）",
         lifespan=lifespan,
     )
     app.state.settings = cfg
