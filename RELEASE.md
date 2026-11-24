@@ -37,7 +37,7 @@
 |---|---|---|
 | v0.1 | 流式问答 + FC + 限流 + 容器化 | 89 测试 / 94% 覆盖 |
 | v0.5 | RAG（切分 / 检索 / 重排 / 引用 / 拒答） | Hit@3 87.5%、MRR 0.729、无关问题 7/7 拒答 |
-| v1.0 | + 状态图 Agent + MCP + trace + 门禁 | 240 测试 / 91% 覆盖 |
+| v1.0 | + 状态图 Agent + MCP + trace + 门禁 | 242 测试 / 90% 覆盖 |
 四套金标（v1.0 跑完）：
 
 | 套件 | 结果 |
@@ -113,6 +113,6 @@ docker exec codeloom python scripts/prefetch_models.py       # 两个模型
 
 ```
 ruff check                 All checks passed
-pytest                     240 passed
+pytest                     242 passed
 ruff / pytest 之外        eval.compare --current eval/runs/v1.json  -> exit 0
 ```

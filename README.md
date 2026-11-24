@@ -65,7 +65,7 @@ git grep -ln "^import openai\|^from openai" src/app/                            
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **240 passed**，覆盖 **91%** |
+| 测试 | **242 passed**，覆盖 **90%** |
 | 检索 | Hit@recall 100%、Hit@3 87.5%、MRR@3 0.729（8 条定位题，`k=3`） |
 | 工具 / 记忆 | tool 5/5、memory 3/3 |
 | 红队 | 服务层拒答 9/10，**可疑输出 0** |
@@ -345,7 +345,7 @@ llm      2357.4ms   prompt=1491 completion=383
 ## 测试与压测
 
 ```bash
-uv run pytest -q --cov          # 240 passed / 91%
+uv run pytest -q --cov          # 242 passed / 90%
 uv run ruff check .             # 分层与格式
 uv run python -m eval.run --k 3 --out eval/runs/v1.json
 uv run python -m eval.compare --current eval/runs/v1.json   # 0/1/2
@@ -381,7 +381,7 @@ src/app/
 └── static/              演示页（v1.html / index.html / rag.html）
 eval/                    四套金标与门禁
 scripts/                 切分、建索引、预热、MCP 自测、部署（ops.py + 4 个封装）
-tests/                   240 例
+tests/                   242 例
 ```
 
 ## License
